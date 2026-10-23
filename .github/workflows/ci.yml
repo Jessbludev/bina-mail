@@ -37,29 +37,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npx markdownlint-cli2 "README.md" "MAP.md" "docs/**/*.md" "DECISIONS/**/*.md"
+      - run: npx markdownlint-cli2 "README.md" "MAP.md" "SNAPSHOT_v*.md" "docs/**/*.md" "DECISIONS/**/*.md"
 
-  web:
-    name: Web (typecheck, lint, tests)
+  contracts:
+    name: Contratos protobuf
     runs-on: ubuntu-latest
-    if: \${{ hashFiles('apps/web/**') != '' }}
-    defaults:
-      run:
-        working-directory: apps/web
+    if: \${{ hashFiles('packages/contracts/proto/**') != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: apps/web/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test -- --coverage
+      - uses: bufbuild/buf-setup-action@v1
+      - name: buf lint
+        working-directory: packages/contracts
+        run: buf lint
 
   go:
     name: Go (lint, tests con -race)
@@ -79,3 +68,25 @@ jobs:
       - name: Vulnerabilidades de dependencias
         working-directory: services
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  web:
+    name: Web (typecheck, lint, tests)
+    runs-on: ubuntu-latest
+    if: \${{ hashFiles('apps/web/pnpm-lock.yaml') != '' }}
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test -- --coverage

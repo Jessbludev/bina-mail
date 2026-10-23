@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package bina.realtime.v1;
+
+// Señal WS sin contenido ni metadatos de mensajes (ADR-005).
+message Signal {
+  string kind = 1; // p.ej. "envelope-stored"
+  string opaque_trace_id = 2;
+}

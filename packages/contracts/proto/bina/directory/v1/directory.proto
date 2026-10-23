@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package bina.directory.v1;
+
+message PublishKeyRequest {
+  string user_id = 1;
+  bytes x25519_public_key = 2;
+  bytes ed25519_signing_public_key = 3;
+  string fingerprint = 4;
+  bytes previous_key_signature = 5;
+}
+
+message PublishKeyResponse {
+  bool ok = 1;
+}
+
+message LookupKeyRequest {
+  string fingerprint = 1;
+}
+
+message LookupKeyResponse {
+  bytes x25519_public_key = 1;
+  bytes ed25519_signing_public_key = 2;
+  bool active = 3;
+}
+
+// Servicio interno de directorio de claves públicas.
+service DirectoryService {
+  rpc PublishKey(PublishKeyRequest) returns (PublishKeyResponse);
+  rpc LookupKey(LookupKeyRequest) returns (LookupKeyResponse);
+}
