@@ -42,7 +42,7 @@ jobs:
   contracts:
     name: Contratos protobuf
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('packages/contracts/proto/**') != '' }}
+    if: ${D}{{ hashFiles('packages/contracts/proto/**') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-setup-action@v1
@@ -53,7 +53,7 @@ jobs:
   go:
     name: Go (lint, tests con -race)
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('services/**') != '' }}
+    if: ${D}{{ hashFiles('services/**') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -72,7 +72,7 @@ jobs:
   lockfiles:
     name: Lockfiles (genera pnpm-lock.yaml si falta)
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('apps/web/package.json') != '' && hashFiles('apps/web/pnpm-lock.yaml') == '' }}
+    if: ${D}{{ hashFiles('apps/web/package.json') != '' && hashFiles('apps/web/pnpm-lock.yaml') == '' }}
     permissions:
       contents: write
     steps:
@@ -98,7 +98,7 @@ jobs:
   web:
     name: Web (typecheck, lint, tests)
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('apps/web/pnpm-lock.yaml') != '' }}
+    if: ${D}{{ hashFiles('apps/web/pnpm-lock.yaml') != '' }}
     defaults:
       run:
         working-directory: apps/web

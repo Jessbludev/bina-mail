@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/jessbludev/bina-mail/services/internal/config"
+	"github.com/jessbludev/bina-mail/services/internal/events"
 	"github.com/jessbludev/bina-mail/services/internal/health"
 	"github.com/jessbludev/bina-mail/services/internal/mailboxapi"
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
@@ -15,6 +16,7 @@ func main() {
 	api := mailboxapi.New(mailboxapi.Config{
 		Supabase:         supabase.New(config.Env("SUPABASE_URL", ""), config.Env("SUPABASE_SERVICE_ROLE_KEY", "")),
 		MaxEnvelopeBytes: 1 << 20,
+		Events:           events.NewHTTPPublisher(config.Env("REALTIME_URL", "http://localhost:8084") + "/internal/events"),
 	})
 	root := http.NewServeMux()
 	root.Handle("/", api)

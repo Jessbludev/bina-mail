@@ -10,10 +10,21 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jessbludev/bina-mail/services/internal/session"
 	"github.com/jessbludev/bina-mail/services/internal/validate"
 )
+
+// RateLimiter es el contrato del contador de uso (Dragonfly, ADR-002/008).
+// Ante error se permite la peticion: el limite es una optimizacion de proteccion.
+type RateLimiter interface {
+	Incr(key string) (int64, error)
+	Expire(key string, ttl time.Duration) error
+}
+
+// rateWindow es la ventana fija del limite por usuario.
+const rateWindow = time.Minute
 
 // Config parametriza la API.
 type Config struct {
@@ -21,6 +32,8 @@ type Config struct {
 	DirectoryURL string
 	MailboxURL   string
 	HTTP         *http.Client
+	Cache        RateLimiter
+	RateLimit    int
 }
 
 type ctxKey int
@@ -75,7 +88,7 @@ func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 			unauthorized(w)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			unauthorized(w)
 			return
@@ -87,8 +100,28 @@ func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 			unauthorized(w)
 			return
 		}
+		if !a.allow(sess.UserID) {
+			writeError(w, http.StatusTooManyRequests, "limite_alcanzado")
+			return
+		}
 		next(w, r.WithContext(context.WithValue(r.Context(), userIDKey, sess.UserID)))
 	}
+}
+
+// allow aplica el limite fijo por ventana; sin cache configurado todo se permite.
+func (a *API) allow(userID string) bool {
+	if a.cfg.RateLimit <= 0 || a.cfg.Cache == nil {
+		return true
+	}
+	key := "rl:" + userID
+	n, err := a.cfg.Cache.Incr(key)
+	if err != nil {
+		return true
+	}
+	if n == 1 {
+		_ = a.cfg.Cache.Expire(key, rateWindow)
+	}
+	return n <= int64(a.cfg.RateLimit)
 }
 
 func (a *API) handleSessionIssue(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +208,7 @@ func (a *API) proxy(w http.ResponseWriter, r *http.Request, method, target strin
 		writeError(w, http.StatusBadGateway, "servicio_no_disponible")
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)

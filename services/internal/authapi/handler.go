@@ -12,12 +12,24 @@ import (
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 )
 
+// sessionCacheTTL acota la propagacion de una revocacion a 30 segundos.
+const sessionCacheTTL = 30 * time.Second
+
+// SessionCache es el contrato del cache opcional (Dragonfly, ADR-002/008).
+// Ante error el handler sigue sin cache: es una optimizacion.
+type SessionCache interface {
+	Get(key string) (value string, found bool, err error)
+	SetEx(key, value string, ttl time.Duration) error
+	Del(key string) error
+}
+
 // Config parametriza el handler. Now se inyecta para determinismo.
 type Config struct {
 	Supabase   *supabase.Client
 	JWTSecret  string
 	SessionTTL time.Duration
 	Now        func() time.Time
+	Cache      SessionCache
 }
 
 // Handler expone la API interna de sesiones.
@@ -88,6 +100,14 @@ func (h *Handler) handleLookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "hash_invalido")
 		return
 	}
+	if h.cfg.Cache != nil {
+		if v, found, err := h.cfg.Cache.Get("sess:" + hash); err == nil && found {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(v))
+			return
+		}
+	}
 	var rows []session.Record
 	err := h.cfg.Supabase.Select(r.Context(), "sessions", map[string]string{"token_hash": hash}, "*", "", 1, &rows)
 	if err != nil {
@@ -103,10 +123,24 @@ func (h *Handler) handleLookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "sesion_expirada")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	body, err := json.Marshal(map[string]string{
 		"user_id":    rec.UserID,
 		"expires_at": rec.ExpiresAt.UTC().Format(time.RFC3339),
 	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "interno")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+	if h.cfg.Cache != nil {
+		ttl := rec.ExpiresAt.Sub(h.cfg.Now())
+		if ttl > sessionCacheTTL {
+			ttl = sessionCacheTTL
+		}
+		_ = h.cfg.Cache.SetEx("sess:"+hash, string(body), ttl)
+	}
 }
 
 func (h *Handler) handleRevoke(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +155,9 @@ func (h *Handler) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	if err := h.cfg.Supabase.Update(r.Context(), "sessions", map[string]string{"token_hash": hash}, row); err != nil {
 		writeError(w, http.StatusBadGateway, "persistencia_sesiones")
 		return
+	}
+	if h.cfg.Cache != nil {
+		_ = h.cfg.Cache.Del("sess:" + hash)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

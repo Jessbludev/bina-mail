@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jessbludev/bina-mail/services/internal/events"
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 	"github.com/jessbludev/bina-mail/services/internal/validate"
 )
@@ -52,10 +53,11 @@ type envelopeRow struct {
 	CreatedAt            time.Time       `json:"created_at"`
 }
 
-// Config parametriza el handler.
+// Config parametriza el handler. Events es opcional (mejor esfuerzo).
 type Config struct {
 	Supabase         *supabase.Client
 	MaxEnvelopeBytes int64
+	Events           events.Publisher
 }
 
 // Handler expone la API interna del buzon.
@@ -113,6 +115,15 @@ func (h *Handler) handleStore(w http.ResponseWriter, r *http.Request) {
 	if len(rows) == 0 {
 		writeError(w, http.StatusInternalServerError, "sin_representacion")
 		return
+	}
+	if h.cfg.Events != nil {
+		// Mejor esfuerzo (ADR-008): la senal es un aviso sin contenido;
+		// si la entrega falla, el cliente refresca su buzon.
+		_ = h.cfg.Events.PublishEnvelopeStored(r.Context(), events.EnvelopeStored{
+			Event:                events.EventEnvelopeStored,
+			ID:                   rows[0].ID,
+			RecipientFingerprint: req.RecipientFingerprint,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": rows[0].ID})
 }

@@ -2,6 +2,7 @@ package mailboxapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jessbludev/bina-mail/services/internal/events"
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 )
 
@@ -19,7 +21,14 @@ var (
 	fpHex      = strings.Repeat("a", 64)
 )
 
-func newHandler(t *testing.T, getResponse string) *Handler {
+type fakePublisher struct{ published []events.EnvelopeStored }
+
+func (f *fakePublisher) PublishEnvelopeStored(_ context.Context, e events.EnvelopeStored) error {
+	f.published = append(f.published, e)
+	return nil
+}
+
+func newHandlerWithEvents(t *testing.T, getResponse string, pub events.Publisher) *Handler {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /rest/v1/envelopes", func(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +39,11 @@ func newHandler(t *testing.T, getResponse string) *Handler {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return New(Config{Supabase: supabase.New(srv.URL, "clave"), MaxEnvelopeBytes: 1024})
+	return New(Config{Supabase: supabase.New(srv.URL, "clave"), MaxEnvelopeBytes: 1024, Events: pub})
+}
+
+func newHandler(t *testing.T, getResponse string) *Handler {
+	return newHandlerWithEvents(t, getResponse, nil)
 }
 
 func storeBody() []byte {
@@ -58,6 +71,24 @@ func TestAlmacenarSobreValido(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "id-sobre-1") {
 		t.Fatal("la respuesta no contenia el id")
+	}
+}
+
+func TestAlmacenarPublicaSenal(t *testing.T) {
+	pub := &fakePublisher{}
+	h := newHandlerWithEvents(t, "[]", pub)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/envelopes", bytes.NewReader(storeBody()))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("estado = %d cuerpo=%s", rec.Code, rec.Body.String())
+	}
+	if len(pub.published) != 1 {
+		t.Fatalf("senales publicadas = %d, se esperaba 1", len(pub.published))
+	}
+	evt := pub.published[0]
+	if evt.Event != events.EventEnvelopeStored || evt.ID != "id-sobre-1" || evt.RecipientFingerprint != fpHex {
+		t.Fatalf("evento incorrecto: %+v", evt)
 	}
 }
 

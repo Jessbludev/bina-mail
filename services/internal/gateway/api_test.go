@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jessbludev/bina-mail/services/internal/session"
 )
@@ -12,6 +14,25 @@ import (
 const validToken = "token-valido"
 
 var validHash = session.Hash(validToken)
+
+type fakeLimiter struct {
+	mu     sync.Mutex
+	counts map[string]int64
+}
+
+func (f *fakeLimiter) Incr(key string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.counts == nil {
+		f.counts = map[string]int64{}
+	}
+	f.counts[key]++
+	return f.counts[key], nil
+}
+
+func (f *fakeLimiter) Expire(key string, ttl time.Duration) error {
+	return nil
+}
 
 func newServices(t *testing.T) (authURL, directoryURL, mailboxURL string) {
 	t.Helper()
@@ -113,5 +134,29 @@ func TestListarSobresValidaFingerprint(t *testing.T) {
 	api.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("estado = %d, se esperaba 400", rec.Code)
+	}
+}
+
+func TestLimiteDePeticionesPorUsuario(t *testing.T) {
+	authURL, directoryURL, mailboxURL := newServices(t)
+	api := New(Config{
+		AuthURL:      authURL,
+		DirectoryURL: directoryURL,
+		MailboxURL:   mailboxURL,
+		Cache:        &fakeLimiter{},
+		RateLimit:    2,
+	})
+	body := `{"recipient_fingerprint":"` + strings.Repeat("a", 64) + `","nonce":"AA==","ciphertext":"BB==","wraps":[{"recipient_key_id":"x"}],"blake3_fingerprint":"` + strings.Repeat("a", 64) + `"}`
+	for i := 1; i <= 3; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/envelopes", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+validToken)
+		api.ServeHTTP(rec, req)
+		if i <= 2 && rec.Code != http.StatusOK {
+			t.Fatalf("peticion %d: estado = %d cuerpo=%s", i, rec.Code, rec.Body.String())
+		}
+		if i == 3 && rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("peticion %d: estado = %d, se esperaba 429", i, rec.Code)
+		}
 	}
 }

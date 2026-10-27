@@ -4,10 +4,22 @@ package directoryapi
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 	"github.com/jessbludev/bina-mail/services/internal/validate"
 )
+
+// keyCacheTTL acota la propagacion de una rotacion de claves a 60 segundos.
+const keyCacheTTL = 60 * time.Second
+
+// KeyCache es el contrato del cache opcional (Dragonfly, ADR-002/008).
+// Ante error el handler sigue sin cache: es una optimizacion.
+type KeyCache interface {
+	Get(key string) (value string, found bool, err error)
+	SetEx(key, value string, ttl time.Duration) error
+	Del(key string) error
+}
 
 // KeyRow es la fila del directorio de claves.
 type KeyRow struct {
@@ -21,6 +33,7 @@ type KeyRow struct {
 // Config parametriza el handler.
 type Config struct {
 	Supabase *supabase.Client
+	Cache    KeyCache
 }
 
 // Handler expone la API interna del directorio.
@@ -67,6 +80,9 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "persistencia_claves")
 		return
 	}
+	if h.cfg.Cache != nil {
+		_ = h.cfg.Cache.Del("fp:" + key.Fingerprint)
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -75,6 +91,14 @@ func (h *Handler) handleLookup(w http.ResponseWriter, r *http.Request) {
 	if !validate.Fingerprint(fingerprint) {
 		writeError(w, http.StatusBadRequest, "fingerprint_invalido")
 		return
+	}
+	if h.cfg.Cache != nil {
+		if v, found, err := h.cfg.Cache.Get("fp:" + fingerprint); err == nil && found {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(v))
+			return
+		}
 	}
 	var rows []KeyRow
 	err := h.cfg.Supabase.Select(r.Context(), "key_directory", map[string]string{
@@ -89,7 +113,17 @@ func (h *Handler) handleLookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "clave_no_encontrada")
 		return
 	}
-	writeJSON(w, http.StatusOK, rows[0])
+	body, err := json.Marshal(rows[0])
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "interno")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+	if h.cfg.Cache != nil {
+		_ = h.cfg.Cache.SetEx("fp:"+fingerprint, string(body), keyCacheTTL)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
