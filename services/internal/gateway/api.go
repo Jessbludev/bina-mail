@@ -10,35 +10,37 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+
+	"github.com/jessbludev/bina-mail/services/internal/ratelimit"
 	"github.com/jessbludev/bina-mail/services/internal/session"
 	"github.com/jessbludev/bina-mail/services/internal/validate"
 )
 
-// RateLimiter es el contrato del contador de uso (Dragonfly, ADR-002/008).
-// Ante error se permite la peticion: el limite es una optimizacion de proteccion.
-type RateLimiter interface {
-	Incr(key string) (int64, error)
-	Expire(key string, ttl time.Duration) error
-}
-
-// rateWindow es la ventana fija del limite por usuario.
-const rateWindow = time.Minute
-
 // Config parametriza la API.
 type Config struct {
-	AuthURL      string
-	DirectoryURL string
-	MailboxURL   string
-	HTTP         *http.Client
-	Cache        RateLimiter
-	RateLimit    int
+	AuthURL       string
+	DirectoryURL  string
+	MailboxURL    string
+	RealtimeURL   string
+	AllowedOrigin string
+	HTTP          *http.Client
+	// Limiter es opcional (Dragonfly o memoria); nil desactiva el limite.
+	Limiter ratelimit.Limiter
 }
+
+// wsHandshakeTimeout acota el establecimiento del tunel hacia realtime.
+const wsHandshakeTimeout = 10 * time.Second
 
 type ctxKey int
 
-const userIDKey ctxKey = 0
+const (
+	userIDKey ctxKey = iota
+	sessionHashKey
+)
 
 // API expone los endpoints publicos del BFF.
 type API struct {
@@ -53,21 +55,59 @@ func New(cfg Config) *API {
 	}
 	a := &API{cfg: cfg, mux: http.NewServeMux()}
 	a.mux.HandleFunc("POST /api/v1/auth/session", a.handleSessionIssue)
+	a.mux.HandleFunc("DELETE /api/v1/auth/session", a.requireSession(a.handleSessionRevoke))
 	a.mux.HandleFunc("POST /api/v1/keys", a.requireSession(a.handlePublishKey))
 	a.mux.HandleFunc("GET /api/v1/keys/{fingerprint}", a.handleLookupKey)
 	a.mux.HandleFunc("POST /api/v1/envelopes", a.requireSession(a.handleStoreEnvelope))
 	a.mux.HandleFunc("GET /api/v1/envelopes", a.requireSession(a.handleListEnvelopes))
+	a.mux.HandleFunc("GET /api/v1/realtime", a.handleRealtime)
 	return a
 }
 
+// ServeHTTP aplica cabeceras de seguridad, CORS estricto por origen unico,
+// preflight y recuperacion de panicos antes de enrutar (ADR-005: la
+// respuesta de error no revela detalles internos).
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	setSecurityHeaders(w)
+	if origin := r.Header.Get("Origin"); origin != "" {
+		if origin != a.cfg.AllowedOrigin {
+			writeError(w, http.StatusForbidden, "origen_no_permitido")
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Add("Vary", "Origin")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			writeError(w, http.StatusInternalServerError, "interno")
+		}
+	}()
 	a.mux.ServeHTTP(w, r)
+}
+
+func setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Cache-Control", "no-store")
 }
 
 // UserID devuelve el usuario autenticado por la sesion opaca.
 func UserID(r *http.Request) string {
 	userID, _ := r.Context().Value(userIDKey).(string)
 	return userID
+}
+
+// SessionHash devuelve el hash de la sesion autenticada.
+func SessionHash(r *http.Request) string {
+	hash, _ := r.Context().Value(sessionHashKey).(string)
+	return hash
 }
 
 func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
@@ -78,7 +118,8 @@ func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		token := strings.TrimPrefix(authz, "Bearer ")
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, a.cfg.AuthURL+"/internal/sessions/"+session.Hash(token), nil)
+		hash := session.Hash(token)
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, a.cfg.AuthURL+"/internal/sessions/"+hash, nil)
 		if err != nil {
 			unauthorized(w)
 			return
@@ -100,28 +141,18 @@ func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 			unauthorized(w)
 			return
 		}
-		if !a.allow(sess.UserID) {
-			writeError(w, http.StatusTooManyRequests, "limite_alcanzado")
-			return
+		// Fail-open documentado (ADR-002): un error del contador no
+		// derriba la disponibilidad; el limite es proteccion adicional.
+		if a.cfg.Limiter != nil {
+			if ok, err := a.cfg.Limiter.Allow(r.Context(), "user:"+sess.UserID); err == nil && !ok {
+				writeError(w, http.StatusTooManyRequests, "limite_alcanzado")
+				return
+			}
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), userIDKey, sess.UserID)))
+		ctx := context.WithValue(r.Context(), userIDKey, sess.UserID)
+		ctx = context.WithValue(ctx, sessionHashKey, hash)
+		next(w, r.WithContext(ctx))
 	}
-}
-
-// allow aplica el limite fijo por ventana; sin cache configurado todo se permite.
-func (a *API) allow(userID string) bool {
-	if a.cfg.RateLimit <= 0 || a.cfg.Cache == nil {
-		return true
-	}
-	key := "rl:" + userID
-	n, err := a.cfg.Cache.Incr(key)
-	if err != nil {
-		return true
-	}
-	if n == 1 {
-		_ = a.cfg.Cache.Expire(key, rateWindow)
-	}
-	return n <= int64(a.cfg.RateLimit)
 }
 
 func (a *API) handleSessionIssue(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +161,15 @@ func (a *API) handleSessionIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.proxy(w, r, http.MethodPost, a.cfg.AuthURL+"/internal/sessions", body, nil)
+}
+
+func (a *API) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
+	hash := SessionHash(r)
+	if hash == "" {
+		unauthorized(w)
+		return
+	}
+	a.proxy(w, r, http.MethodDelete, a.cfg.AuthURL+"/internal/sessions/"+hash, nil, nil)
 }
 
 func (a *API) handlePublishKey(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +225,57 @@ func (a *API) handleListEnvelopes(w http.ResponseWriter, r *http.Request) {
 	q.Set("recipient_fingerprint", recipient)
 	q.Set("limit", strconv.Itoa(limit))
 	a.proxy(w, r, http.MethodGet, a.cfg.MailboxURL+"/internal/envelopes?"+q.Encode(), nil, nil)
+}
+
+// handleRealtime tiende un tunel WS hacia realtime; la autenticacion
+// ocurre dentro del canal con el primer mensaje (ADR-005/ADR-007), porque
+// el navegador no puede enviar cabeceras Authorization en un WS.
+func (a *API) handleRealtime(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(req *http.Request) bool {
+			return req.Header.Get("Origin") == a.cfg.AllowedOrigin
+		},
+	}
+	downstream, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer func() { _ = downstream.Close() }()
+	target := "ws" + strings.TrimPrefix(a.cfg.RealtimeURL, "http") + "/internal/signal"
+	dialer := websocket.Dialer{HandshakeTimeout: wsHandshakeTimeout}
+	upstream, _, err := dialer.DialContext(r.Context(), target, nil)
+	if err != nil {
+		return
+	}
+	defer func() { _ = upstream.Close() }()
+	// Gorilla exige un unico escritor por conexion: cada direccion del
+	// tunel tiene su propia goroutine de escritura.
+	done := make(chan struct{})
+	var once sync.Once
+	closeOnce := func() { once.Do(func() { close(done) }) }
+	go func() {
+		defer closeOnce()
+		pipeWS(downstream, upstream)
+	}()
+	go func() {
+		defer closeOnce()
+		pipeWS(upstream, downstream)
+	}()
+	<-done
+}
+
+func pipeWS(from, to *websocket.Conn) {
+	for {
+		messageType, data, err := from.ReadMessage()
+		if err != nil {
+			return
+		}
+		if err := to.WriteMessage(messageType, data); err != nil {
+			return
+		}
+	}
 }
 
 func (a *API) proxy(w http.ResponseWriter, r *http.Request, method, target string, body []byte, headers map[string]string) {
