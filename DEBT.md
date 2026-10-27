@@ -1,10 +1,10 @@
-# DEBT — Deuda explícita y auditable
+# DEBT — Deuda explicita y auditable
 
-Formato: ID | Descripción | Módulo | Dueño | Fecha de revisión | Estado
+Formato: ID | Descripcion | Modulo | Dueno | Fecha de revision | Estado
 
-| ID | Descripción | Módulo | Dueño | Fecha de revisión | Estado |
+| ID | Descripcion | Modulo | Dueno | Fecha de revision | Estado |
 |---|---|---|---|---|---|
-| DEBT-001 | apps/web sin pnpm-lock.yaml: el gate web de la CI se activa cuando exista el lockfile (condición explícita en ci.yml). Generarlo con pnpm install en entorno con red y subirlo en su PR | apps/web | web | 2026-11-05 | Abierta |
-| DEBT-002 | Código Go generado desde packages/contracts (buf generate) pendiente hasta el primer consumidor gRPC en Fase 2 | packages/contracts | backend | Inicio de Fase 2 | Abierta |
+| DEBT-001 | Cerrada por automatizacion: el job lockfiles de la CI genera y confirma pnpm-lock.yaml en el primer flujo tras cada cambio de dependencias | apps/web | web | Cerrada por CI | Cerrada |
+| DEBT-002 | gRPC diferido por ADR-007: transporte interno HTTP/JSON con protobuf canonico; buf generate cuando llegue el primer consumidor gRPC | packages/contracts | backend | Inicio de Fase 3 | Abierta |
 
-Toda deuda (técnica, de seguridad u observabilidad) se registra aquí en el momento en que se decide dejar algo sin hacer a propósito, con dueño y fecha de revisión.
+Toda deuda (tecnica, de seguridad u observabilidad) se registra aqui en el momento en que se decide dejar algo sin hacer a proposito, con dueno y fecha de revision.

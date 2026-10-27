@@ -1,21 +1,59 @@
+import { deriveKEK } from "./argon2id";
+import { fingerprint } from "./blake3";
+import { fromB64, toB64 } from "./b64";
+import { buildEnvelope, openEnvelope } from "./envelope";
+import { generateIdentity } from "./x25519";
 import type { CryptoRequest, CryptoResponse } from "./messages";
 
 /**
- * Worker criptográfico de Bina Mail (Fase 1: esqueleto).
- * La implementación real (Argon2id, XChaCha20-Poly1305, BLAKE3) llega en Fase 2
- * con vectores de test obligatorios (ADR-004).
+ * Worker criptografico de Bina Mail (Fase 2, ADR-004).
+ * Toda primitiva criptografica vive aqui; la app solo ve base64 y JSON.
  */
 const ctx = self as unknown as {
   onmessage: ((event: MessageEvent<CryptoRequest>) => void) | null;
   postMessage(message: CryptoResponse): void;
 };
 
-ctx.onmessage = (event) => {
+ctx.onmessage = (event: MessageEvent<CryptoRequest>) => {
   const request = event.data;
-  const response: CryptoResponse = {
-    id: request.id,
-    ok: false,
-    error: "not-implemented: Fase 2 (ADR-004)",
-  };
-  ctx.postMessage(response);
+  try {
+    ctx.postMessage({ id: request.id, ok: true, payload: handle(request) });
+  } catch (error) {
+    ctx.postMessage({
+      id: request.id,
+      ok: false,
+      error: error instanceof Error ? error.message : "error_desconocido",
+    });
+  }
 };
+
+function handle(request: CryptoRequest): unknown {
+  switch (request.type) {
+    case "derive-kek":
+      return { kekB64: toB64(deriveKEK(request.passphrase, fromB64(request.saltB64))) };
+    case "generate-identity": {
+      const identity = generateIdentity();
+      return {
+        privateKeyB64: toB64(identity.privateKey),
+        publicKeyB64: toB64(identity.publicKey),
+        fingerprint: fingerprint(identity.publicKey),
+      };
+    }
+    case "seal":
+      return buildEnvelope(
+        request.plaintext,
+        {
+          keyId: request.recipientFingerprint,
+          publicKey: fromB64(request.recipientPublicKeyB64),
+        },
+        { senderFingerprint: request.senderFingerprint },
+      );
+    case "open":
+      return {
+        plaintext: new TextDecoder().decode(
+          openEnvelope(request.envelope, fromB64(request.privateKeyB64)),
+        ),
+      };
+  }
+  throw new Error("peticion_desconocida");
+}
