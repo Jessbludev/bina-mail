@@ -14,7 +14,7 @@
 - Despliegue objetivo: cloud gestionado (Supabase + Fly.io/Railway).
 - Cache: Dragonfly (ADR-002). Colas: Redpanda (ADR-003). Criptografía: Argon2id + BLAKE3 + X25519 + XChaCha20-Poly1305 (ADR-004).
 - Sin código de aplicación. Documentación, mapa, ADRs, CI y plantillas definidas.
-- Biblia maestra del proyecto en Notion (visión, roadmap, amenazas, flujo de trabajo).
+- Biblia maestra del proyecto manejando internamente aplicando (visión, roadmap, amenazas, flujo de trabajo).
 
 ## Métricas Clave
 
