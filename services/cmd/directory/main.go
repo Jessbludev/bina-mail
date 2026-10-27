@@ -4,23 +4,24 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
-	"github.com/jessbludev/bina-mail/services/internal/cache"
 	"github.com/jessbludev/bina-mail/services/internal/config"
 	"github.com/jessbludev/bina-mail/services/internal/directoryapi"
 	"github.com/jessbludev/bina-mail/services/internal/health"
+	"github.com/jessbludev/bina-mail/services/internal/resp"
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 )
 
 func main() {
-	var keyCache directoryapi.KeyCache
-	if addr := config.Env("CACHE_ADDR", ""); addr != "" {
-		conn, err := cache.Dial(addr)
+	var keyCache resp.Cache
+	if addr := config.Env("DRAGONFLY_ADDR", ""); addr != "" {
+		client, err := resp.Dial(addr, 2*time.Second)
 		if err != nil {
 			log.Fatalf("directory: cache no disponible en %s: %v", addr, err)
 		}
-		defer func() { _ = conn.Close() }()
-		keyCache = conn
+		defer func() { _ = client.Close() }()
+		keyCache = client
 	}
 	api := directoryapi.New(directoryapi.Config{
 		Supabase: supabase.New(config.Env("SUPABASE_URL", ""), config.Env("SUPABASE_SERVICE_ROLE_KEY", "")),

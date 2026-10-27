@@ -1,27 +1,28 @@
-// Command auth gestiona identidad, sesiones y rotacion de tokens (MAP.md).
+// Command auth gestiona sesiones opacas de corta vida (MAP.md).
 package main
 
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/jessbludev/bina-mail/services/internal/authapi"
-	"github.com/jessbludev/bina-mail/services/internal/cache"
 	"github.com/jessbludev/bina-mail/services/internal/config"
 	"github.com/jessbludev/bina-mail/services/internal/health"
+	"github.com/jessbludev/bina-mail/services/internal/resp"
 	"github.com/jessbludev/bina-mail/services/internal/session"
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 )
 
 func main() {
-	var sessionCache authapi.SessionCache
-	if addr := config.Env("CACHE_ADDR", ""); addr != "" {
-		conn, err := cache.Dial(addr)
+	var sessionCache resp.Cache
+	if addr := config.Env("DRAGONFLY_ADDR", ""); addr != "" {
+		client, err := resp.Dial(addr, 2*time.Second)
 		if err != nil {
 			log.Fatalf("auth: cache no disponible en %s: %v", addr, err)
 		}
-		defer func() { _ = conn.Close() }()
-		sessionCache = conn
+		defer func() { _ = client.Close() }()
+		sessionCache = client
 	}
 	api := authapi.New(authapi.Config{
 		Supabase:   supabase.New(config.Env("SUPABASE_URL", ""), config.Env("SUPABASE_SERVICE_ROLE_KEY", "")),
