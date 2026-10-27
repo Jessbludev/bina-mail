@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jessbludev/bina-mail/services/internal/events"
@@ -21,14 +22,28 @@ var (
 	fpHex      = strings.Repeat("a", 64)
 )
 
-type fakePublisher struct{ published []events.EnvelopeStored }
+type fakePublisher struct {
+	mu        sync.Mutex
+	published [][]byte
+}
 
-func (f *fakePublisher) PublishEnvelopeStored(_ context.Context, e events.EnvelopeStored) error {
-	f.published = append(f.published, e)
+func (f *fakePublisher) Publish(_ context.Context, _ []byte, value []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.published = append(f.published, value)
 	return nil
 }
 
-func newHandlerWithEvents(t *testing.T, getResponse string, pub events.Publisher) *Handler {
+func (f *fakePublisher) last() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.published) == 0 {
+		return nil
+	}
+	return f.published[len(f.published)-1]
+}
+
+func newHandlerWithPublisher(t *testing.T, getResponse string, pub Publisher) *Handler {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /rest/v1/envelopes", func(w http.ResponseWriter, r *http.Request) {
@@ -39,11 +54,11 @@ func newHandlerWithEvents(t *testing.T, getResponse string, pub events.Publisher
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return New(Config{Supabase: supabase.New(srv.URL, "clave"), MaxEnvelopeBytes: 1024, Events: pub})
+	return New(Config{Supabase: supabase.New(srv.URL, "clave"), MaxEnvelopeBytes: 1024, Publisher: pub})
 }
 
 func newHandler(t *testing.T, getResponse string) *Handler {
-	return newHandlerWithEvents(t, getResponse, nil)
+	return newHandlerWithPublisher(t, getResponse, nil)
 }
 
 func storeBody() []byte {
@@ -74,21 +89,37 @@ func TestAlmacenarSobreValido(t *testing.T) {
 	}
 }
 
-func TestAlmacenarPublicaSenal(t *testing.T) {
+func TestAlmacenarPublicaEvento(t *testing.T) {
 	pub := &fakePublisher{}
-	h := newHandlerWithEvents(t, "[]", pub)
+	h := newHandlerWithPublisher(t, "[]", pub)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/internal/envelopes", bytes.NewReader(storeBody()))
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("estado = %d cuerpo=%s", rec.Code, rec.Body.String())
 	}
-	if len(pub.published) != 1 {
-		t.Fatalf("senales publicadas = %d, se esperaba 1", len(pub.published))
+	event, err := events.ParseEnvelopeStored(pub.last())
+	if err != nil {
+		t.Fatalf("evento invalido: %v", err)
 	}
-	evt := pub.published[0]
-	if evt.Event != events.EventEnvelopeStored || evt.ID != "id-sobre-1" || evt.RecipientFingerprint != fpHex {
-		t.Fatalf("evento incorrecto: %+v", evt)
+	if event.EnvelopeID != "id-sobre-1" {
+		t.Fatalf("envelope_id = %q, se esperaba id-sobre-1", event.EnvelopeID)
+	}
+	if event.RecipientFingerprint != fpHex {
+		t.Fatalf("recipient_fingerprint = %q", event.RecipientFingerprint)
+	}
+	if event.Type != events.TypeMailboxEnvelopeStored || event.Version != events.VersionEvents {
+		t.Fatalf("evento inesperado: %+v", event)
+	}
+}
+
+func TestAlmacenarSinPublicadorNoFallayGuarda(t *testing.T) {
+	h := newHandlerWithPublisher(t, "[]", nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/internal/envelopes", bytes.NewReader(storeBody()))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("estado = %d", rec.Code)
 	}
 }
 
@@ -98,8 +129,8 @@ func TestAlmacenarSobreConFingerprintInvalido(t *testing.T) {
 		"recipient_fingerprint": "no-hex",
 		"nonce":                 nonceB64,
 		"ciphertext":            cipherB64,
-		"wraps":                []map[string]string{{"recipient_key_id": fpHex}},
-		"blake3_fingerprint":   fpHex,
+		"wraps":                 []map[string]string{{"recipient_key_id": fpHex}},
+		"blake3_fingerprint":    fpHex,
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/internal/envelopes", bytes.NewReader(body))

@@ -1,4 +1,5 @@
-// Command mailbox persiste y consulta sobres cifrados E2EE (ADR-004).
+// Command mailbox persiste y consulta sobres cifrados E2EE (ADR-004) y
+// publica senales de sobre nuevo en Redpanda (ADR-008).
 package main
 
 import (
@@ -8,16 +9,25 @@ import (
 	"github.com/jessbludev/bina-mail/services/internal/config"
 	"github.com/jessbludev/bina-mail/services/internal/events"
 	"github.com/jessbludev/bina-mail/services/internal/health"
+	"github.com/jessbludev/bina-mail/services/internal/kafka"
 	"github.com/jessbludev/bina-mail/services/internal/mailboxapi"
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 )
 
 func main() {
-	api := mailboxapi.New(mailboxapi.Config{
+	cfg := mailboxapi.Config{
 		Supabase:         supabase.New(config.Env("SUPABASE_URL", ""), config.Env("SUPABASE_SERVICE_ROLE_KEY", "")),
 		MaxEnvelopeBytes: 1 << 20,
-		Events:           events.NewHTTPPublisher(config.Env("REALTIME_URL", "http://localhost:8084") + "/internal/events"),
-	})
+	}
+	if brokers := config.CSV("KAFKA_BROKERS"); len(brokers) > 0 {
+		producer, err := kafka.NewProducer(brokers, config.Env("KAFKA_TOPIC", events.TopicMailboxEnvelopeStored))
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer producer.Close()
+		cfg.Publisher = producer
+	}
+	api := mailboxapi.New(cfg)
 	root := http.NewServeMux()
 	root.Handle("/", api)
 	root.Handle("/healthz", health.Handler("mailbox"))

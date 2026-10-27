@@ -2,6 +2,7 @@
 package mailboxapi
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -53,11 +54,18 @@ type envelopeRow struct {
 	CreatedAt            time.Time       `json:"created_at"`
 }
 
-// Config parametriza el handler. Events es opcional (mejor esfuerzo).
+// Publisher envia senales de sobre nuevo al bus (Redpanda via
+// kafka.NewProducer); nil desactiva la publicacion.
+type Publisher interface {
+	Publish(ctx context.Context, key, value []byte) error
+}
+
+// Config parametriza el handler. Publisher es opcional (mejor esfuerzo).
 type Config struct {
 	Supabase         *supabase.Client
 	MaxEnvelopeBytes int64
-	Events           events.Publisher
+	// Publisher es opcional (Redpanda); nil desactiva las senales.
+	Publisher Publisher
 }
 
 // Handler expone la API interna del buzon.
@@ -116,14 +124,11 @@ func (h *Handler) handleStore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "sin_representacion")
 		return
 	}
-	if h.cfg.Events != nil {
-		// Mejor esfuerzo (ADR-008): la senal es un aviso sin contenido;
-		// si la entrega falla, el cliente refresca su buzon.
-		_ = h.cfg.Events.PublishEnvelopeStored(r.Context(), events.EnvelopeStored{
-			Event:                events.EventEnvelopeStored,
-			ID:                   rows[0].ID,
-			RecipientFingerprint: req.RecipientFingerprint,
-		})
+	if h.cfg.Publisher != nil {
+		payload := events.NewEnvelopeStored(rows[0].ID, req.RecipientFingerprint, time.Now().UTC())
+		// Mejor esfuerzo e idempotente (ADR-008): la senal es un aviso sin
+		// contenido; si la entrega falla, el cliente refresca su buzon.
+		_ = h.cfg.Publisher.Publish(r.Context(), []byte(req.RecipientFingerprint), payload)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": rows[0].ID})
 }
