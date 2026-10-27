@@ -93,7 +93,7 @@ func (h *Handler) handleIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"token":      token,
-		"" + "expires_at": rec.ExpiresAt.UTC().Format(time.RFC3339),
+		"expires_at": rec.ExpiresAt.UTC().Format(time.RFC3339),
 	})
 }
 
