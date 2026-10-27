@@ -2,28 +2,68 @@ package authapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jessbludev/bina-mail/services/internal/jwt"
+	"github.com/jessbludev/bina-mail/services/internal/resp"
 	"github.com/jessbludev/bina-mail/services/internal/session"
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 )
 
-func newStub(t *testing.T) *httptest.Server {
+type memCache struct {
+	mu   sync.Mutex
+	data map[string]string
+}
+
+func newMemCache() *memCache {
+	return &memCache{data: map[string]string{}}
+}
+
+func (m *memCache) Get(_ context.Context, key string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	value, ok := m.data[key]
+	return value, ok, nil
+}
+
+func (m *memCache) SetEx(_ context.Context, key, value string, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data[key] = value
+	return nil
+}
+
+func (m *memCache) Del(_ context.Context, keys ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, key := range keys {
+		delete(m.data, key)
+	}
+	return nil
+}
+
+type authStub struct {
+	getCalls int32
+	expires  string
+}
+
+func newStub(t *testing.T, s *authStub) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /rest/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	})
 	mux.HandleFunc("GET /rest/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
-		expires := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-		_, _ = w.Write([]byte(`[{"token_hash":"h","user_id":"11111111-1111-1111-1111-111111111111","expires_at":"` + expires + `"}]`))
+		atomic.AddInt32(&s.getCalls, 1)
+		_, _ = w.Write([]byte(`[{"token_hash":"h","user_id":"11111111-1111-1111-1111-111111111111","expires_at":"` + s.expires + `"}]`))
 	})
 	mux.HandleFunc("PATCH /rest/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -33,45 +73,23 @@ func newStub(t *testing.T) *httptest.Server {
 	return srv
 }
 
-func newHandler(stub *httptest.Server) *Handler {
+func newHandler(srv *httptest.Server, cache resp.Cache) *Handler {
 	return New(Config{
-		Supabase:   supabase.New(stub.URL, "clave"),
+		Supabase:   supabase.New(srv.URL, "clave"),
 		JWTSecret:  "secreto",
 		SessionTTL: time.Minute,
 		Now:        func() time.Time { return time.Unix(1700000000, 0).UTC() },
+		Cache:      cache,
 	})
 }
 
-type fakeCache struct {
-	mu   sync.Mutex
-	data map[string]string
-}
-
-func newFakeCache() *fakeCache { return &fakeCache{data: map[string]string{}} }
-
-func (f *fakeCache) Get(key string) (string, bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	v, ok := f.data[key]
-	return v, ok, nil
-}
-
-func (f *fakeCache) SetEx(key, value string, ttl time.Duration) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.data[key] = value
-	return nil
-}
-
-func (f *fakeCache) Del(key string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.data, key)
-	return nil
+func lookupRequest() *http.Request {
+	return httptest.NewRequest(http.MethodGet, "/internal/sessions/"+strings.Repeat("a", 64), nil)
 }
 
 func TestEmitirSesionValida(t *testing.T) {
-	h := newHandler(newStub(t))
+	srv := newStub(t, &authStub{expires: farExpiry()})
+	h := newHandler(srv, nil)
 	now := time.Unix(1700000000, 0).UTC()
 	token, err := jwt.SignHS256("secreto", jwt.Claims{Subject: "11111111-1111-1111-1111-111111111111", Expiry: now.Add(time.Hour).Unix()})
 	if err != nil {
@@ -94,7 +112,8 @@ func TestEmitirSesionValida(t *testing.T) {
 }
 
 func TestEmitirSesionConJwtInvalido(t *testing.T) {
-	h := newHandler(newStub(t))
+	srv := newStub(t, &authStub{expires: farExpiry()})
+	h := newHandler(srv, nil)
 	token, _ := jwt.SignHS256("secreto-equivocado", jwt.Claims{Subject: "u", Expiry: time.Now().Add(time.Hour).Unix()})
 	body, _ := json.Marshal(map[string]string{"supabase_jwt": token})
 	rec := httptest.NewRecorder()
@@ -106,10 +125,10 @@ func TestEmitirSesionConJwtInvalido(t *testing.T) {
 }
 
 func TestLookupSesionActiva(t *testing.T) {
-	h := newHandler(newStub(t))
+	srv := newStub(t, &authStub{expires: farExpiry()})
+	h := newHandler(srv, nil)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/internal/sessions/"+strings.Repeat("a", 64), nil)
-	h.ServeHTTP(rec, req)
+	h.ServeHTTP(rec, lookupRequest())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("estado = %d cuerpo=%s", rec.Code, rec.Body.String())
 	}
@@ -119,7 +138,8 @@ func TestLookupSesionActiva(t *testing.T) {
 }
 
 func TestLookupHashInvalido(t *testing.T) {
-	h := newHandler(newStub(t))
+	srv := newStub(t, &authStub{expires: farExpiry()})
+	h := newHandler(srv, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/internal/sessions/xyz", nil)
 	h.ServeHTTP(rec, req)
@@ -128,76 +148,58 @@ func TestLookupHashInvalido(t *testing.T) {
 	}
 }
 
-func TestLookupUsaCache(t *testing.T) {
-	getCalls := 0
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /rest/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
-		getCalls++
-		expires := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-		_, _ = w.Write([]byte(`[{"token_hash":"h","user_id":"11111111-1111-1111-1111-111111111111","expires_at":"` + expires + `"}]`))
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	h := New(Config{
-		Supabase:   supabase.New(srv.URL, "clave"),
-		JWTSecret:  "secreto",
-		SessionTTL: time.Minute,
-		Now:        func() time.Time { return time.Unix(1700000000, 0).UTC() },
-		Cache:      newFakeCache(),
-	})
-	for i := 0; i < 2; i++ {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/internal/sessions/"+strings.Repeat("a", 64), nil)
-		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("llamada %d: estado = %d cuerpo=%s", i+1, rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), "11111111-1111-1111-1111-111111111111") {
-			t.Fatalf("llamada %d: la respuesta no contenia el user_id", i+1)
-		}
-	}
-	if getCalls != 1 {
-		t.Fatalf("consultas a PostgREST = %d, se esperaba 1 (cache activo)", getCalls)
-	}
-}
-
-func TestRevocarBorraCache(t *testing.T) {
-	getCalls := 0
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /rest/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
-		getCalls++
-		expires := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-		_, _ = w.Write([]byte(`[{"token_hash":"h","user_id":"11111111-1111-1111-1111-111111111111","expires_at":"` + expires + `"}]`))
-	})
-	mux.HandleFunc("PATCH /rest/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	h := New(Config{
-		Supabase:   supabase.New(srv.URL, "clave"),
-		JWTSecret:  "secreto",
-		SessionTTL: time.Minute,
-		Now:        func() time.Time { return time.Unix(1700000000, 0).UTC() },
-		Cache:      newFakeCache(),
-	})
-	lookup := func() {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/internal/sessions/"+strings.Repeat("a", 64), nil)
-		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("estado = %d cuerpo=%s", rec.Code, rec.Body.String())
-		}
-	}
-	lookup()
+func TestRevocarSesion(t *testing.T) {
+	srv := newStub(t, &authStub{expires: farExpiry()})
+	h := newHandler(srv, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/internal/sessions/"+strings.Repeat("a", 64), nil)
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("estado = %d, se esperaba 204", rec.Code)
 	}
-	lookup()
-	if getCalls != 2 {
-		t.Fatalf("consultas a PostgREST = %d, se esperaba 2 (revocacion borro el cache)", getCalls)
+}
+
+func TestLaCacheAhorraConsultas(t *testing.T) {
+	stub := &authStub{expires: farExpiry()}
+	srv := newStub(t, stub)
+	h := newHandler(srv, newMemCache())
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, lookupRequest())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("estado = %d", rec.Code)
+		}
 	}
+	if atomic.LoadInt32(&stub.getCalls) != 1 {
+		t.Fatalf("llamadas a la base de datos = %d, se esperaba 1", stub.getCalls)
+	}
+}
+
+func TestRevocarInvalidaLaCache(t *testing.T) {
+	stub := &authStub{expires: farExpiry()}
+	srv := newStub(t, stub)
+	h := newHandler(srv, newMemCache())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, lookupRequest())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("estado = %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/internal/sessions/"+strings.Repeat("a", 64), nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("estado = %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, lookupRequest())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("estado = %d", rec.Code)
+	}
+	if atomic.LoadInt32(&stub.getCalls) != 2 {
+		t.Fatalf("llamadas a la base de datos = %d, se esperaba 2 tras revocar", stub.getCalls)
+	}
+}
+
+func farExpiry() string {
+	return time.Unix(1900000000, 0).UTC().Format(time.RFC3339)
 }

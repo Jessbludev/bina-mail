@@ -2,26 +2,17 @@
 package authapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/jessbludev/bina-mail/services/internal/jwt"
+	"github.com/jessbludev/bina-mail/services/internal/resp"
 	"github.com/jessbludev/bina-mail/services/internal/session"
 	"github.com/jessbludev/bina-mail/services/internal/supabase"
 )
-
-// sessionCacheTTL acota la propagacion de una revocacion a 30 segundos.
-const sessionCacheTTL = 30 * time.Second
-
-// SessionCache es el contrato del cache opcional (Dragonfly, ADR-002/008).
-// Ante error el handler sigue sin cache: es una optimizacion.
-type SessionCache interface {
-	Get(key string) (value string, found bool, err error)
-	SetEx(key, value string, ttl time.Duration) error
-	Del(key string) error
-}
 
 // Config parametriza el handler. Now se inyecta para determinismo.
 type Config struct {
@@ -29,7 +20,19 @@ type Config struct {
 	JWTSecret  string
 	SessionTTL time.Duration
 	Now        func() time.Time
-	Cache      SessionCache
+	// Cache es opcional (Dragonfly); nil desactiva la cache de sesiones.
+	Cache resp.Cache
+}
+
+// sessionCacheTTL acota la vida de la cache; nunca supera la expiracion
+// propia de la sesion almacenada.
+const sessionCacheTTL = 30 * time.Second
+
+// lookupResponse es la respuesta publica del lookup; sin datos de
+// mensajes (ADR-005).
+type lookupResponse struct {
+	UserID    string `json:"user_id"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // Handler expone la API interna de sesiones.
@@ -90,7 +93,7 @@ func (h *Handler) handleIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"token":      token,
-		"expires_at": rec.ExpiresAt.UTC().Format(time.RFC3339),
+		"" + "expires_at": rec.ExpiresAt.UTC().Format(time.RFC3339),
 	})
 }
 
@@ -100,13 +103,9 @@ func (h *Handler) handleLookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "hash_invalido")
 		return
 	}
-	if h.cfg.Cache != nil {
-		if v, found, err := h.cfg.Cache.Get("sess:" + hash); err == nil && found {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(v))
-			return
-		}
+	if cached, ok := h.cachedLookup(r.Context(), hash); ok {
+		writeJSON(w, http.StatusOK, cached)
+		return
 	}
 	var rows []session.Record
 	err := h.cfg.Supabase.Select(r.Context(), "sessions", map[string]string{"token_hash": hash}, "*", "", 1, &rows)
@@ -123,24 +122,12 @@ func (h *Handler) handleLookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "sesion_expirada")
 		return
 	}
-	body, err := json.Marshal(map[string]string{
-		"user_id":    rec.UserID,
-		"expires_at": rec.ExpiresAt.UTC().Format(time.RFC3339),
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "interno")
-		return
+	response := lookupResponse{
+		UserID:    rec.UserID,
+		ExpiresAt: rec.ExpiresAt.UTC().Format(time.RFC3339),
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
-	if h.cfg.Cache != nil {
-		ttl := rec.ExpiresAt.Sub(h.cfg.Now())
-		if ttl > sessionCacheTTL {
-			ttl = sessionCacheTTL
-		}
-		_ = h.cfg.Cache.SetEx("sess:"+hash, string(body), ttl)
-	}
+	h.cacheLookup(r.Context(), hash, response, rec.ExpiresAt)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) handleRevoke(w http.ResponseWriter, r *http.Request) {
@@ -157,9 +144,42 @@ func (h *Handler) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.cfg.Cache != nil {
-		_ = h.cfg.Cache.Del("sess:" + hash)
+		_ = h.cfg.Cache.Del(r.Context(), "bina:sess:"+hash)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) cachedLookup(ctx context.Context, hash string) (lookupResponse, bool) {
+	if h.cfg.Cache == nil {
+		return lookupResponse{}, false
+	}
+	value, ok, err := h.cfg.Cache.Get(ctx, "bina:sess:"+hash)
+	if err != nil || !ok {
+		return lookupResponse{}, false
+	}
+	var response lookupResponse
+	if err := json.Unmarshal([]byte(value), &response); err != nil || response.UserID == "" {
+		return lookupResponse{}, false
+	}
+	return response, true
+}
+
+func (h *Handler) cacheLookup(ctx context.Context, hash string, response lookupResponse, expiresAt time.Time) {
+	if h.cfg.Cache == nil {
+		return
+	}
+	ttl := sessionCacheTTL
+	if until := expiresAt.Sub(h.cfg.Now()); until < ttl {
+		ttl = until
+	}
+	if ttl <= 0 {
+		return
+	}
+	value, err := json.Marshal(response)
+	if err != nil {
+		return
+	}
+	_ = h.cfg.Cache.SetEx(ctx, "bina:sess:"+hash, string(value), ttl)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
