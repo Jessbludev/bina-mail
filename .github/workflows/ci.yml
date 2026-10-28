@@ -42,7 +42,7 @@ jobs:
   contracts:
     name: Contratos protobuf
     runs-on: ubuntu-latest
-    if: ${D}{{ hashFiles('packages/contracts/proto/**') != '' }}
+    if: ${{ hashFiles('packages/contracts/proto/**') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-setup-action@v1
@@ -53,12 +53,12 @@ jobs:
   go:
     name: Go (lint, tests con -race)
     runs-on: ubuntu-latest
-    if: ${D}{{ hashFiles('services/**') != '' }}
+    if: ${{ hashFiles('services/go.sum') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
       - uses: golangci/golangci-lint-action@v6
         with:
           working-directory: services
@@ -70,35 +70,46 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   lockfiles:
-    name: Lockfiles (genera pnpm-lock.yaml si falta)
+    name: Lockfiles (genera pnpm-lock.yaml y go.sum si faltan)
     runs-on: ubuntu-latest
-    if: ${D}{{ hashFiles('apps/web/package.json') != '' && hashFiles('apps/web/pnpm-lock.yaml') == '' }}
+    if: ${{ (hashFiles('apps/web/package.json') != '' && hashFiles('apps/web/pnpm-lock.yaml') == '') || (hashFiles('services/go.mod') != '' && hashFiles('services/go.sum') == '') }}
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - name: Generar pnpm-lock.yaml
+        if: ${{ hashFiles('apps/web/pnpm-lock.yaml') == '' }}
         working-directory: apps/web
         run: pnpm install --lockfile-only
-      - name: Confirmar lockfile al repositorio (cierra DEBT-001)
-        working-directory: apps/web
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Generar go.sum (cierra DEBT-003)
+        if: ${{ hashFiles('services/go.sum') == '' }}
+        working-directory: services
+        run: go mod tidy
+      - name: Confirmar lockfiles al repositorio
         run: |
           git config user.name "bina-ci"
           git config user.email "ci@bina-mail.local"
-          git add pnpm-lock.yaml
-          git commit -m "chore: genera pnpm-lock.yaml (DEBT-001)"
+          git add apps/web/pnpm-lock.yaml services/go.sum
+          if git diff --cached --quiet; then
+            echo "sin lockfiles nuevos que confirmar"
+            exit 0
+          fi
+          git commit -m "chore: genera lockfiles (pnpm-lock.yaml, go.sum)"
           git push
 
   web:
     name: Web (typecheck, lint, tests)
     runs-on: ubuntu-latest
-    if: ${D}{{ hashFiles('apps/web/pnpm-lock.yaml') != '' }}
+    if: ${{ hashFiles('apps/web/pnpm-lock.yaml') != '' }}
     defaults:
       run:
         working-directory: apps/web
