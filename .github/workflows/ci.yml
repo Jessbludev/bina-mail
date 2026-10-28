@@ -68,7 +68,7 @@ jobs:
         if: ${{ hashFiles('apps/web/package.json') != '' }}
         working-directory: apps/web
         run: pnpm install --lockfile-only
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
       - name: Sincronizar go.sum
@@ -93,7 +93,7 @@ jobs:
     if: ${{ hashFiles('services/go.sum') != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
       - uses: golangci/golangci-lint-action@v6
