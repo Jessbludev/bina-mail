@@ -11,6 +11,10 @@ export const layout = {
   row: "flex flex-wrap items-center gap-3",
 } as const;
 
+export const shell = {
+  main: "mx-auto w-full max-w-3xl px-4 py-6 sm:px-6",
+} as const;
+
 export const typography = {
   heading: "text-2xl font-semibold text-neutral-50",
   subheading: "text-sm text-neutral-400",
@@ -80,6 +84,9 @@ export const emptyState = {
 
 export const nav = {
   header: "border-b border-neutral-800 bg-neutral-950",
+  row: "mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6",
+  brand: "text-base font-semibold text-neutral-50",
+  actions: "flex items-center gap-2",
   link: "rounded-md px-3 py-2 text-sm font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
   linkActive: "text-sky-300",
 } as const;

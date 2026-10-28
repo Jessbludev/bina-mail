@@ -1,26 +1,45 @@
 <script setup lang="ts">
+import { RouterView, useRouter } from "vue-router";
 import { useSessionStore } from "./stores/session";
-import { buttonClasses } from "./styles/tokens";
+import { a11y, buttonClasses, layout, nav, shell } from "./styles/tokens";
 
 const session = useSessionStore();
+const router = useRouter();
 
-function toggleSession() {
-  if (session.status === "unlocked") {
-    session.lock();
-  } else {
-    session.unlock();
-  }
+async function bloquear() {
+  session.lock();
+  await router.replace("/desbloqueo");
+}
+
+async function cerrarSesion() {
+  await session.cerrarSesion();
+  await router.replace("/acceso");
 }
 </script>
 
 <template>
-  <main class="flex min-h-screen items-center justify-center bg-neutral-950">
-    <div class="space-y-4 text-center">
-      <h1 class="text-2xl font-semibold text-neutral-50">Bina Mail</h1>
-      <p class="text-sm text-neutral-400">Estado de sesión: {{ session.status }}</p>
-      <button :class="buttonClasses('primary')" type="button" @click="toggleSession">
-        {{ session.status === "unlocked" ? "Bloquear" : "Desbloquear" }}
-      </button>
-    </div>
-  </main>
+  <div :class="layout.page">
+    <a href="#contenido" :class="a11y.skipLink">Saltar al contenido</a>
+    <header v-if="session.phase !== 'signed-out'" :class="nav.header">
+      <div :class="nav.row">
+        <p :class="nav.brand">Bina Mail</p>
+        <div :class="nav.actions">
+          <button
+            v-if="session.phase === 'unlocked'"
+            :class="buttonClasses('ghost')"
+            type="button"
+            @click="bloquear"
+          >
+            Bloquear
+          </button>
+          <button :class="buttonClasses('ghost')" type="button" @click="cerrarSesion">
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+    </header>
+    <main id="contenido" :class="shell.main">
+      <RouterView />
+    </main>
+  </div>
 </template>
