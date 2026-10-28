@@ -1,0 +1,44 @@
+# Dependabot: alertas y actualizaciones automaticas por ecosistema.
+# Los paquetes criptograficos @noble/* permanecen fijados a version exacta
+# (determinismo criptografico); solo se aceptan sus security updates.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      dependencias-de-desarrollo:
+        dependency-type: development
+      dependencias-de-produccion:
+        dependency-type: production
+    ignore:
+      # Fijado exacto por decision de criptografia: sin version updates,
+      # los security updates no se ven afectados por update-types.
+      - dependency-name: "@noble/*"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+
+  - package-ecosystem: gomod
+    directory: /services
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(ci)"
