@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { useMailboxStore } from "./mailbox";
+import { reiniciarIndice, useMailboxStore } from "./mailbox";
 import { listEnvelopes } from "../shared/api";
 import { cryptoRequest } from "../shared/cryptoBridge";
 
@@ -25,8 +25,16 @@ const filaBase = {
   created_at: "2026-10-28T12:00:00Z",
 };
 
+const filaSegunda = {
+  ...filaBase,
+  id: "sobre-2",
+  sender_fingerprint: "fp-remitente",
+  created_at: "2026-10-28T13:00:00Z",
+};
+
 beforeEach(() => {
   setActivePinia(createPinia());
+  reiniciarIndice();
   vi.mocked(listEnvelopes).mockReset();
   vi.mocked(cryptoRequest).mockReset();
 });
@@ -78,13 +86,11 @@ describe("useMailboxStore", () => {
   });
 
   it("preserva el remitente cuando el sobre lo declara", async () => {
-    vi.mocked(listEnvelopes).mockResolvedValue([
-      { ...filaBase, sender_fingerprint: "fp-remitente" },
-    ]);
+    vi.mocked(listEnvelopes).mockResolvedValue([filaSegunda]);
     vi.mocked(cryptoRequest).mockResolvedValue("texto");
     const store = useMailboxStore();
     await store.refrescar("token-1", "fp-destinatario");
-    await store.abrir("sobre-1", "privada");
+    await store.abrir("sobre-2", "privada");
     const entrada = vi.mocked(cryptoRequest).mock.calls[0][0] as unknown as {
       envelope: { sender_fingerprint?: string };
     };
@@ -94,5 +100,22 @@ describe("useMailboxStore", () => {
   it("rechaza abrir un sobre que no esta en la bandeja", async () => {
     const store = useMailboxStore();
     await expect(store.abrir("desconocido", "privada")).rejects.toThrow("sobre_inexistente");
+  });
+
+  it("indexa al abrir y busca con termino sin diacriticos", async () => {
+    vi.mocked(listEnvelopes).mockResolvedValue([filaBase, filaSegunda]);
+    vi.mocked(cryptoRequest)
+      .mockResolvedValueOnce("El cafe esta listo")
+      .mockResolvedValueOnce("Otro asunto distinto");
+    const store = useMailboxStore();
+    await store.refrescar("token-1", "fp-destinatario");
+    await store.abrir("sobre-1", "privada");
+    await store.abrir("sobre-2", "privada");
+    const hallados = store.buscar("CAFÉ");
+    expect(hallados).toHaveLength(1);
+    expect(hallados[0].id).toBe("sobre-1");
+    expect(store.buscar("   ")).toHaveLength(0);
+    store.limpiar();
+    expect(store.buscar("cafe")).toHaveLength(0);
   });
 });

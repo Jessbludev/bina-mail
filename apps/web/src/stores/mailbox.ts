@@ -1,10 +1,22 @@
 import { defineStore } from "pinia";
 import { listEnvelopes, type MailboxEnvelope } from "../shared/api";
 import { cryptoRequest } from "../shared/cryptoBridge";
+import { IndiceBusqueda } from "../shared/search";
 import type { EnvelopeJson } from "../workers/crypto/envelope";
 import { PARAMS_VERSION } from "../workers/crypto/params";
 
 export type MailboxStatus = "vacio" | "cargando" | "listo" | "error";
+
+/**
+ * Indice de busqueda del buzon: unica instancia por sesion de la app,
+ * en RAM y sobre textos ya descifrados (ADR-009).
+ */
+const indice = new IndiceBusqueda();
+
+/** Visible para pruebas: reinicia el indice de busqueda del buzon. */
+export function reiniciarIndice(): void {
+  indice.limpiar();
+}
 
 /**
  * Buzon del usuario. Los sobres viajan cifrados y se descifran bajo demanda
@@ -57,7 +69,14 @@ export const useMailboxStore = defineStore("mailbox", {
         privateKeyB64,
       });
       this.abiertos[id] = plaintext; // Cache en RAM: nunca se persiste.
+      indice.indexar(id, plaintext); // Busqueda local: RAM, sin servidor.
       return plaintext;
+    },
+
+    /** Busca sobre los textos ya descifrados en esta sesion. */
+    buscar(termino: string): MailboxEnvelope[] {
+      const ids = new Set(indice.buscar(termino));
+      return this.items.filter((item) => ids.has(item.id));
     },
 
     limpiar(): void {
@@ -65,6 +84,7 @@ export const useMailboxStore = defineStore("mailbox", {
       this.abiertos = {};
       this.status = "vacio";
       this.error = "";
+      indice.limpiar();
     },
   },
 });

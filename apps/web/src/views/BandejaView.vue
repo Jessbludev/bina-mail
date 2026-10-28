@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import BaseButton from "../components/ui/BaseButton.vue";
+import BaseField from "../components/ui/BaseField.vue";
 import BaseSkeleton from "../components/ui/BaseSkeleton.vue";
 import EmptyState from "../components/ui/EmptyState.vue";
 import { useSessionStore } from "../stores/session";
@@ -18,7 +19,13 @@ const mailbox = useMailboxStore();
 const router = useRouter();
 
 const estadoRealtime = ref<EstadoRealtime>("detenida");
+const termino = ref("");
 let realtime: ClienteRealtime | null = null;
+
+const buscando = computed(() => termino.value.trim() !== "");
+const itemsVisibles = computed(() =>
+  buscando.value ? mailbox.buscar(termino.value) : mailbox.items,
+);
 
 onMounted(() => {
   void refrescar();
@@ -65,6 +72,10 @@ function tamanoDe(bytes: number): string {
   return (bytes / 1024).toFixed(1) + " KiB";
 }
 
+function conteo(n: number): string {
+  return n === 1 ? "1 resultado" : n + " resultados";
+}
+
 function mensajeDeError(): string {
   if (mailbox.error.includes("limite_alcanzado")) {
     return "Demasiadas consultas; espere un momento e intente de nuevo.";
@@ -97,17 +108,33 @@ const textoRealtime = computed(() => {
     </div>
     <p :class="typography.meta" aria-live="polite">{{ textoRealtime }}</p>
     <div :class="stack">
+      <BaseField
+        id="bandeja-busqueda"
+        v-model="termino"
+        label="Buscar"
+        type="text"
+        autocomplete="off"
+        placeholder="Buscar en los sobres abiertos"
+      />
+      <p v-if="buscando" :class="typography.meta" role="status">
+        {{ conteo(itemsVisibles.length) }} en los sobres abiertos de esta sesión.
+      </p>
       <BaseSkeleton v-if="mailbox.status === 'cargando'" :lines="4" />
       <p v-else-if="mailbox.status === 'error'" :class="statusClasses('error')" role="alert">
         {{ mensajeDeError() }}
       </p>
       <EmptyState
-        v-else-if="mailbox.items.length === 0"
+        v-else-if="buscando && itemsVisibles.length === 0"
+        title="Sin resultados"
+        description="Ningún sobre abierto en esta sesión contiene ese término."
+      />
+      <EmptyState
+        v-else-if="itemsVisibles.length === 0"
         title="Su bandeja está vacía"
         description="Cuando alguien le envíe un sobre cifrado aparecerá aquí. El servidor solo almacena ciphertext."
       />
       <ul v-else :class="list">
-        <li v-for="item in mailbox.items" :key="item.id">
+        <li v-for="item in itemsVisibles" :key="item.id">
           <button :class="listRow" type="button" @click="abrir(item.id)">
             <span :class="typography.subheading">{{ remitente(item.sender_fingerprint) }}</span>
             <span :class="typography.meta">
