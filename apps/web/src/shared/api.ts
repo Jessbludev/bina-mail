@@ -12,27 +12,35 @@ export class ApiError extends Error {
     public readonly status: number,
     public readonly code: string,
   ) {
-    super(`API ${status}: ${code}`);
+    super("API " + String(status) + ": " + code);
+  }
+}
+
+async function errorCode(response: Response): Promise<string> {
+  let code = "error";
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && "error" in body) {
+      const errorField = (body as { error: unknown }).error;
+      if (typeof errorField === "string") {
+        code = errorField;
+      }
+    }
+  } catch {
+    // Cuerpo sin JSON: se conserva el codigo generico.
+  }
+  return code;
+}
+
+async function requireOk(response: Response): Promise<void> {
+  if (!response.ok) {
+    throw new ApiError(response.status, await errorCode(response));
   }
 }
 
 async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  if (!response.ok) {
-    let code = "error";
-    try {
-      const body: unknown = await response.json();
-      if (typeof body === "object" && body !== null && "error" in body) {
-        const errorField = (body as { error: unknown }).error;
-        if (typeof errorField === "string") {
-          code = errorField;
-        }
-      }
-    } catch {
-      // Cuerpo sin JSON: se conserva el codigo generico.
-    }
-    throw new ApiError(response.status, code);
-  }
+  await requireOk(response);
   return (await response.json()) as T;
 }
 
@@ -42,7 +50,7 @@ export interface AuthSession {
 }
 
 export async function signUp(email: string, password: string): Promise<void> {
-  await requestJson<unknown>(`${supabaseUrl}/auth/v1/signup`, {
+  await requestJson<unknown>(supabaseUrl + "/auth/v1/signup", {
     method: "POST",
     headers: jsonHeaders({ apikey: supabaseAnonKey }),
     body: JSON.stringify({ email, password }),
@@ -51,7 +59,7 @@ export async function signUp(email: string, password: string): Promise<void> {
 
 export async function signIn(email: string, password: string): Promise<string> {
   const result = await requestJson<{ access_token: string }>(
-    `${supabaseUrl}/auth/v1/token?grant_type=password`,
+    supabaseUrl + "/auth/v1/token?grant_type=password",
     {
       method: "POST",
       headers: jsonHeaders({ apikey: supabaseAnonKey }),
@@ -62,11 +70,20 @@ export async function signIn(email: string, password: string): Promise<string> {
 }
 
 export function exchangeSession(supabaseJwt: string): Promise<AuthSession> {
-  return requestJson<AuthSession>(`${gatewayUrl}/api/v1/auth/session`, {
+  return requestJson<AuthSession>(gatewayUrl + "/api/v1/auth/session", {
     method: "POST",
     headers: jsonHeaders(),
     body: JSON.stringify({ supabase_jwt: supabaseJwt }),
   });
+}
+
+/** Cierra la sesion opaca; el backend responde 204 sin cuerpo. */
+export async function revokeSession(sessionToken: string): Promise<void> {
+  const response = await fetch(gatewayUrl + "/api/v1/auth/session", {
+    method: "DELETE",
+    headers: jsonHeaders({ Authorization: "Bearer " + sessionToken }),
+  });
+  await requireOk(response);
 }
 
 export interface PublicKeyRecord {
@@ -85,19 +102,19 @@ export interface PublishedKey {
 }
 
 export function publishKey(sessionToken: string, key: PublishedKey): Promise<{ ok: boolean }> {
-  return requestJson<{ ok: boolean }>(`${gatewayUrl}/api/v1/keys`, {
+  return requestJson<{ ok: boolean }>(gatewayUrl + "/api/v1/keys", {
     method: "POST",
-    headers: jsonHeaders({ Authorization: `Bearer ${sessionToken}` }),
+    headers: jsonHeaders({ Authorization: "Bearer " + sessionToken }),
     body: JSON.stringify(key),
   });
 }
 
 export function lookupKey(sessionToken: string, fingerprint: string): Promise<PublicKeyRecord> {
   return requestJson<PublicKeyRecord>(
-    `${gatewayUrl}/api/v1/keys/${encodeURIComponent(fingerprint)}`,
+    gatewayUrl + "/api/v1/keys/" + encodeURIComponent(fingerprint),
     {
       method: "GET",
-      headers: jsonHeaders({ Authorization: `Bearer ${sessionToken}` }),
+      headers: jsonHeaders({ Authorization: "Bearer " + sessionToken }),
     },
   );
 }
@@ -106,9 +123,9 @@ export function storeEnvelope(
   sessionToken: string,
   envelope: EnvelopeJson,
 ): Promise<{ id: string }> {
-  return requestJson<{ id: string }>(`${gatewayUrl}/api/v1/envelopes`, {
+  return requestJson<{ id: string }>(gatewayUrl + "/api/v1/envelopes", {
     method: "POST",
-    headers: jsonHeaders({ Authorization: `Bearer ${sessionToken}` }),
+    headers: jsonHeaders({ Authorization: "Bearer " + sessionToken }),
     body: JSON.stringify(envelope),
   });
 }
@@ -122,9 +139,9 @@ export function listEnvelopes(
     recipient_fingerprint: recipientFingerprint,
     limit: String(limit),
   });
-  return requestJson<EnvelopeJson[]>(`${gatewayUrl}/api/v1/envelopes?${query}`, {
+  return requestJson<EnvelopeJson[]>(gatewayUrl + "/api/v1/envelopes?" + query.toString(), {
     method: "GET",
-    headers: jsonHeaders({ Authorization: `Bearer ${sessionToken}` }),
+    headers: jsonHeaders({ Authorization: "Bearer " + sessionToken }),
   });
 }
 

@@ -2,11 +2,12 @@ import { deriveKEK } from "./argon2id";
 import { fingerprint } from "./blake3";
 import { fromB64, toB64 } from "./b64";
 import { buildEnvelope, openEnvelope } from "./envelope";
+import { createIdentity, unlockIdentity } from "./identity";
 import { generateIdentity } from "./x25519";
 import type { CryptoRequest, CryptoResponse } from "./messages";
 
 /**
- * Worker criptografico de Bina Mail (Fase 2, ADR-004).
+ * Worker criptografico de Bina Mail (ADR-004).
  * Toda primitiva criptografica vive aqui; la app solo ve base64 y JSON.
  */
 const ctx = self as unknown as {
@@ -39,6 +40,13 @@ function handle(request: CryptoRequest): unknown {
         fingerprint: fingerprint(identity.publicKey),
       };
     }
+    case "create-identity":
+      return createIdentity(request.passphrase);
+    case "unlock-identity":
+      return unlockIdentity(request.passphrase, {
+        saltB64: request.saltB64,
+        identitySealedB64: request.identitySealedB64,
+      });
     case "seal":
       return buildEnvelope(
         request.plaintext,

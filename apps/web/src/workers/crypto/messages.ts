@@ -9,6 +9,8 @@ export type CryptoRequestId = string;
 export type CryptoRequest =
   | { id: CryptoRequestId; type: "derive-kek"; passphrase: string; saltB64: string }
   | { id: CryptoRequestId; type: "generate-identity" }
+  | { id: CryptoRequestId; type: "create-identity"; passphrase: string }
+  | { id: CryptoRequestId; type: "unlock-identity"; passphrase: string; saltB64: string; identitySealedB64: string }
   | {
       id: CryptoRequestId;
       type: "seal";
@@ -22,3 +24,7 @@ export type CryptoRequest =
 export type CryptoResponse =
   | { id: CryptoRequestId; ok: true; payload: unknown }
   | { id: CryptoRequestId; ok: false; error: string };
+
+/** Entrada sin id para el puente de promesas (distribuye sobre la union). */
+type WithoutId<T> = T extends { id: CryptoRequestId } ? Omit<T, "id"> : never;
+export type CryptoInput = WithoutId<CryptoRequest>;
