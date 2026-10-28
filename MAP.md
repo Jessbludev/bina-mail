@@ -1,12 +1,16 @@
-# MAP — Mapa de módulos de Bina Mail
+# MAP — Mapa de modulos de Bina Mail
 
-Regla: si un módulo no está aquí, no existe operativamente. Marque lo pendiente con "?" y regístrelo como trabajo nuevo. No lo invente ni lo asuma.
+Regla: si un modulo no esta aqui, no existe operativamente. Marque lo pendiente con "?" y registrelo como trabajo nuevo. No lo invente ni lo asuma.
 
-| Módulo | Responsabilidad única | Dueño | SLO | Invariante | Dependencias |
+| Modulo | Responsabilidad unica | Dueno | SLO | Invariante | Dependencias |
 |---|---|---|---|---|---|
-| apps/web | SPA: UI, estado Pinia, orquestación de features | web | TTI p95 < 2 s; LCP p75 < 2,5 s | Ninguna clave privada sale del dispositivo | gateway |
+| apps/web | SPA: UI, estado Pinia, orquestacion de features | web | TTI p95 < 2 s; LCP p75 < 2,5 s | Ninguna clave privada sale del dispositivo | gateway |
 | apps/web/workers/crypto | KDF, cifrado de sobres, firmas | web | Cifrado de mensaje p95 < 100 ms | Cero acceso a DOM o red fuera del contrato de mensajes | apps/web |
-| services/gateway | Borde público HTTP/WS (Chi), validación de input, BFF | backend | p99 < 200 ms; disponibilidad 99,9 % | Ningún contenido en claro cruza este borde | auth, directory, mailbox, realtime |
+| apps/web/ui | Sistema de diseño: tokens tipados y componentes base accesibles | web | Contraste AA 4,5:1 verificado en suite | Sin clases sueltas fuera de tokens.ts | apps/web |
+| apps/web/views | Vistas de acceso, desbloqueo, bandeja, redacción y lectura | web | TTI p95 < 2 s | Ningún plaintext sale del Worker | apps/web/ui, workers/crypto, stores |
+| apps/web/realtime | Cliente WS de señales con reconexión y refresco de bandeja | web | Señal→refresco p95 < 1 s | El token nunca viaja en URL ni query | gateway, stores |
+| apps/web/search | Índice de búsqueda local en memoria sobre sobres descifrados | web | Búsqueda p95 < 50 ms con 500 sobres | El índice vive solo en RAM, nunca persiste en claro | workers/crypto |
+| services/gateway | Borde público HTTP/WS (BFF), validación de input, cabeceras de seguridad, CORS por origen único | backend | p99 < 200 ms; disponibilidad 99,9 % | Ningún contenido en claro cruza este borde | auth, directory, mailbox, realtime |
 | services/auth | Identidad, sesiones, MFA, rotación de tokens | backend | Disponibilidad 99,9 % | El servidor jamás almacena material clave recuperable | Supabase, Dragonfly |
 | services/directory | Registro de claves públicas, fingerprints, verificación | backend | p99 < 100 ms | Almacena solo claves públicas y metadatos mínimos | Postgres, Dragonfly |
 | services/mailbox | Persistencia y consulta de sobres cifrados | backend | Escritura p99 < 150 ms | El servidor nunca ve plaintext de mensajes | Postgres, Redpanda |

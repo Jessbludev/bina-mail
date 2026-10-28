@@ -50,6 +50,43 @@ jobs:
         working-directory: packages/contracts
         run: buf lint
 
+  lockfiles:
+    name: Lockfiles (sincroniza pnpm-lock.yaml y go.sum en cada push)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && (hashFiles('apps/web/package.json') != '' || hashFiles('services/go.mod') != '') }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Sincronizar pnpm-lock.yaml
+        if: ${{ hashFiles('apps/web/package.json') != '' }}
+        working-directory: apps/web
+        run: pnpm install --lockfile-only
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Sincronizar go.sum
+        if: ${{ hashFiles('services/go.mod') != '' }}
+        working-directory: services
+        run: go mod tidy
+      - name: Confirmar cambios de lockfiles
+        run: |
+          git config user.name "bina-ci"
+          git config user.email "ci@bina-mail.local"
+          git add apps/web/pnpm-lock.yaml services/go.sum
+          if git diff --cached --quiet; then
+            echo "lockfiles sincronizados"
+            exit 0
+          fi
+          git commit -m "chore: sincroniza lockfiles (pnpm-lock.yaml, go.sum)"
+          git push
+
   go:
     name: Go (lint, tests con -race)
     runs-on: ubuntu-latest
@@ -68,43 +105,6 @@ jobs:
       - name: Vulnerabilidades de dependencias
         working-directory: services
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-
-  lockfiles:
-    name: Lockfiles (genera pnpm-lock.yaml y go.sum si faltan)
-    runs-on: ubuntu-latest
-    if: ${{ (hashFiles('apps/web/package.json') != '' && hashFiles('apps/web/pnpm-lock.yaml') == '') || (hashFiles('services/go.mod') != '' && hashFiles('services/go.sum') == '') }}
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - name: Generar pnpm-lock.yaml
-        if: ${{ hashFiles('apps/web/pnpm-lock.yaml') == '' }}
-        working-directory: apps/web
-        run: pnpm install --lockfile-only
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"
-      - name: Generar go.sum (cierra DEBT-003)
-        if: ${{ hashFiles('services/go.sum') == '' }}
-        working-directory: services
-        run: go mod tidy
-      - name: Confirmar lockfiles al repositorio
-        run: |
-          git config user.name "bina-ci"
-          git config user.email "ci@bina-mail.local"
-          git add apps/web/pnpm-lock.yaml services/go.sum
-          if git diff --cached --quiet; then
-            echo "sin lockfiles nuevos que confirmar"
-            exit 0
-          fi
-          git commit -m "chore: genera lockfiles (pnpm-lock.yaml, go.sum)"
-          git push
 
   web:
     name: Web (typecheck, lint, tests)
