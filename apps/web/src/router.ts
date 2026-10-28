@@ -4,7 +4,6 @@ import { useSessionStore } from "./stores/session";
 /**
  * Rutas de la Fase 4 (ADR-009): la URL es la unica fuente de verdad de la
  * vista; ninguna ruta transporta token ni datos en la query.
- * La redaccion llega con la tanda siguiente.
  */
 type FaseRuta = "anonimo" | "sesion" | "desbloqueado";
 
@@ -34,6 +33,12 @@ export const router = createRouter({
       path: "/bandeja/:id",
       name: "lectura",
       component: () => import("./views/LecturaView.vue"),
+      meta: { fase: "desbloqueado" },
+    },
+    {
+      path: "/redaccion",
+      name: "redaccion",
+      component: () => import("./views/RedaccionView.vue"),
       meta: { fase: "desbloqueado" },
     },
   ],

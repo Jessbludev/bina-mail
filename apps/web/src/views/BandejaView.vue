@@ -1,19 +1,44 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import BaseButton from "../components/ui/BaseButton.vue";
 import BaseSkeleton from "../components/ui/BaseSkeleton.vue";
 import EmptyState from "../components/ui/EmptyState.vue";
 import { useSessionStore } from "../stores/session";
 import { useMailboxStore } from "../stores/mailbox";
+import {
+  ClienteRealtime,
+  urlRealtime,
+  type EstadoRealtime,
+} from "../shared/realtime";
 import { layout, list, listRow, stack, statusClasses, typography } from "../styles/tokens";
 
 const session = useSessionStore();
 const mailbox = useMailboxStore();
 const router = useRouter();
 
+const estadoRealtime = ref<EstadoRealtime>("detenida");
+let realtime: ClienteRealtime | null = null;
+
 onMounted(() => {
   void refrescar();
+  if (session.phase === "unlocked" && session.sessionToken !== "") {
+    realtime = new ClienteRealtime({
+      token: session.sessionToken,
+      alSenal: () => {
+        void refrescar();
+      },
+      alEstado: (estado) => {
+        estadoRealtime.value = estado;
+      },
+    });
+    realtime.iniciar();
+  }
+});
+
+onUnmounted(() => {
+  realtime?.detener();
+  realtime = null;
 });
 
 async function refrescar(): Promise<void> {
@@ -46,6 +71,16 @@ function mensajeDeError(): string {
   }
   return "No se pudo cargar la bandeja; compruebe su conexión.";
 }
+
+const textoRealtime = computed(() => {
+  if (estadoRealtime.value === "lista") {
+    return "Conexión en tiempo real activa.";
+  }
+  if (estadoRealtime.value === "conectando" || estadoRealtime.value === "reintentando") {
+    return "Reconectando el canal en tiempo real…";
+  }
+  return "Canal en tiempo real detenido; use Actualizar.";
+});
 </script>
 
 <template>
@@ -60,6 +95,7 @@ function mensajeDeError(): string {
         Actualizar
       </BaseButton>
     </div>
+    <p :class="typography.meta" aria-live="polite">{{ textoRealtime }}</p>
     <div :class="stack">
       <BaseSkeleton v-if="mailbox.status === 'cargando'" :lines="4" />
       <p v-else-if="mailbox.status === 'error'" :class="statusClasses('error')" role="alert">

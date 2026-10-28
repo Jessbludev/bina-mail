@@ -32,6 +32,13 @@ async function cerrarSesion() {
           >
             Bandeja
           </RouterLink>
+          <RouterLink
+            v-if="session.phase === 'unlocked'"
+            :class="navLinkClasses(route.path === '/redaccion')"
+            to="/redaccion"
+          >
+            Redacción
+          </RouterLink>
         </div>
         <div :class="nav.actions">
           <button
