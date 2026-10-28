@@ -18,6 +18,8 @@ export const shell = {
 export const typography = {
   heading: "text-2xl font-semibold text-neutral-50",
   subheading: "text-sm text-neutral-400",
+  body: "whitespace-pre-wrap break-words text-sm text-neutral-100",
+  meta: "text-xs text-neutral-500",
 } as const;
 
 export const button = {
@@ -94,6 +96,8 @@ export const nav = {
 export function navLinkClasses(active: boolean): string {
   return [nav.link, active ? nav.linkActive : ""].filter(Boolean).join(" ");
 }
+
+export const list = "m-0 list-none space-y-2 p-0";
 
 export const listRow =
   "block w-full rounded-md border border-neutral-800 bg-neutral-900 p-3 text-left transition-colors hover:border-neutral-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400";

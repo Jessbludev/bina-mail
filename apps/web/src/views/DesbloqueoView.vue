@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useRouter } from "vue-router";
 import BaseButton from "../components/ui/BaseButton.vue";
 import BaseField from "../components/ui/BaseField.vue";
 import BasePanel from "../components/ui/BasePanel.vue";
@@ -8,12 +9,13 @@ import { useSessionStore } from "../stores/session";
 import { layout, stack, statusClasses, typography } from "../styles/tokens";
 
 const session = useSessionStore();
+const router = useRouter();
 
 const creando = computed(() => session.vault === null);
 const passphrase = ref("");
 const confirmacion = ref("");
 const ocupado = ref(false);
-const aviso = ref<{ tipo: "success" | "error"; texto: string } | null>(null);
+const aviso = ref<{ texto: string } | null>(null);
 
 const titulo = computed(() =>
   creando.value ? "Crear su identidad cifrada" : "Desbloquear su identidad",
@@ -41,18 +43,14 @@ async function enviar() {
   try {
     if (creando.value) {
       await session.crearIdentidad(passphrase.value);
-      aviso.value = {
-        tipo: "success",
-        texto: "Identidad creada y clave pública publicada en el directorio.",
-      };
     } else {
       await session.desbloquear(passphrase.value);
-      aviso.value = { tipo: "success", texto: "Identidad desbloqueada en este dispositivo." };
     }
     passphrase.value = "";
     confirmacion.value = "";
+    await router.replace("/bandeja");
   } catch (error) {
-    aviso.value = { tipo: "error", texto: mensajeDe(error) };
+    aviso.value = { texto: mensajeDe(error) };
   } finally {
     ocupado.value = false;
   }
@@ -69,10 +67,16 @@ function mensajeDe(error: unknown): string {
     if (error.message === "fingerprint_no_coincide") {
       return "La identidad descifrada no coincide con este dispositivo.";
     }
+    if (error.message === "sesion_requerida" || error.message === "identidad_ausente") {
+      return "Su sesión expiró; inicie sesión de nuevo.";
+    }
   }
   if (error instanceof ApiError) {
     if (error.status === 429) {
       return "Demasiados intentos; espere un momento.";
+    }
+    if (error.status === 409) {
+      return "Esta identidad ya publicó una clave; contacte soporte si no es suya.";
     }
     return "El servicio no está disponible ahora; vuelva a intentarlo.";
   }
@@ -103,8 +107,8 @@ function mensajeDe(error: unknown): string {
           required
           :error="errorConfirmacion"
         />
-        <p v-if="aviso" :class="statusClasses(aviso.tipo)" role="status">{{ aviso.texto }}</p>
-        <p v-if="session.fingerprint !== ''" :class="typography.subheading">
+        <p v-if="aviso" :class="statusClasses('error')" role="alert">{{ aviso.texto }}</p>
+        <p v-if="session.fingerprint !== ''" :class="typography.meta">
           Huella de su clave: {{ session.fingerprint.slice(0, 16) }}…
         </p>
         <div :class="layout.row">

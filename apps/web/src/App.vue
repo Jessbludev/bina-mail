@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { RouterView, useRouter } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useSessionStore } from "./stores/session";
-import { a11y, buttonClasses, layout, nav, shell } from "./styles/tokens";
+import { a11y, buttonClasses, layout, nav, navLinkClasses, shell } from "./styles/tokens";
 
 const session = useSessionStore();
+const route = useRoute();
 const router = useRouter();
 
 async function bloquear() {
@@ -22,7 +23,16 @@ async function cerrarSesion() {
     <a href="#contenido" :class="a11y.skipLink">Saltar al contenido</a>
     <header v-if="session.phase !== 'signed-out'" :class="nav.header">
       <div :class="nav.row">
-        <p :class="nav.brand">Bina Mail</p>
+        <div :class="nav.actions">
+          <p :class="nav.brand">Bina Mail</p>
+          <RouterLink
+            v-if="session.phase === 'unlocked'"
+            :class="navLinkClasses(route.path.startsWith('/bandeja'))"
+            to="/bandeja"
+          >
+            Bandeja
+          </RouterLink>
+        </div>
         <div :class="nav.actions">
           <button
             v-if="session.phase === 'unlocked'"

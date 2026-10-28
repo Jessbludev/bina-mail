@@ -3,7 +3,7 @@
  * Ninguna funcion registra contenido de mensajes (politica zero-log, ADR-005).
  */
 import { loadConfig } from "./config";
-import type { EnvelopeJson } from "../workers/crypto/envelope";
+import type { EnvelopeJson, EnvelopeWrap } from "../workers/crypto/envelope";
 
 const { gatewayUrl, supabaseUrl, supabaseAnonKey } = loadConfig();
 
@@ -130,16 +130,33 @@ export function storeEnvelope(
   });
 }
 
+/**
+ * Fila del buzon devuelta por el backend: identificador persistente,
+ * tamanio y fecha de creacion junto al sobre cifrado completo.
+ * El texto claro nunca viaja por esta via.
+ */
+export interface MailboxEnvelope {
+  readonly id: string;
+  readonly sender_fingerprint: string;
+  readonly recipient_fingerprint: string;
+  readonly nonce: string;
+  readonly ciphertext: string;
+  readonly wraps: readonly EnvelopeWrap[];
+  readonly blake3_fingerprint: string;
+  readonly size_bytes: number;
+  readonly created_at: string;
+}
+
 export function listEnvelopes(
   sessionToken: string,
   recipientFingerprint: string,
   limit = 50,
-): Promise<EnvelopeJson[]> {
+): Promise<MailboxEnvelope[]> {
   const query = new URLSearchParams({
     recipient_fingerprint: recipientFingerprint,
     limit: String(limit),
   });
-  return requestJson<EnvelopeJson[]>(gatewayUrl + "/api/v1/envelopes?" + query.toString(), {
+  return requestJson<MailboxEnvelope[]>(gatewayUrl + "/api/v1/envelopes?" + query.toString(), {
     method: "GET",
     headers: jsonHeaders({ Authorization: "Bearer " + sessionToken }),
   });
