@@ -21,7 +21,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Validacion de workflows (actionlint)
-        uses: raven-actions/actionlint@v1
+        uses: raven-actions/actionlint@v2
       - name: Auditoria zero-log (patrones prohibidos)
         run: |
           if grep -rnE 'log\.(Info|Debug|Warn|Printf)|slog\.(Info|Debug|Warn)|console\.log' services apps | grep -E 'subject|recipient|sender|plaintext|body'; then
