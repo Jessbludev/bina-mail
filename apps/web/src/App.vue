@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useSessionStore } from "./stores/session";
+import { useMailboxStore } from "./stores/mailbox";
 import { a11y, buttonClasses, layout, nav, navLinkClasses, shell } from "./styles/tokens";
 
 const session = useSessionStore();
+const mailbox = useMailboxStore();
 const route = useRoute();
 const router = useRouter();
 
 async function bloquear() {
   session.lock();
+  // Vacia textos claros e indice de busqueda: nada sobrevive al bloqueo.
+  mailbox.limpiar();
   await router.replace("/desbloqueo");
 }
 
 async function cerrarSesion() {
   await session.cerrarSesion();
+  // Vacia textos claros e indice: la RAM no conserva mensajes de nadie.
+  mailbox.limpiar();
   await router.replace("/acceso");
 }
 </script>
