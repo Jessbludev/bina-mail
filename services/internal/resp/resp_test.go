@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -193,8 +194,20 @@ func TestErrorDelServadorSeDevuelve(t *testing.T) {
 		if err != nil {
 			return
 		}
-		_, _ = conn.Write([]byte("-ERR fallo simulado\r\n"))
-		_ = conn.Close()
+		defer func() { _ = conn.Close() }()
+		reader := bufio.NewReader(conn)
+		if _, err := readRESPArray(reader); err != nil {
+			return
+		}
+		if _, err := conn.Write([]byte("+PONG\r\n")); err != nil {
+			return
+		}
+		if _, err := readRESPArray(reader); err != nil {
+			return
+		}
+		if _, err := conn.Write([]byte("-ERR fallo simulado\r\n")); err != nil {
+			return
+		}
 	}()
 	client, err := Dial(ln.Addr().String(), time.Second)
 	if err != nil {
@@ -203,4 +216,46 @@ func TestErrorDelServadorSeDevuelve(t *testing.T) {
 	if _, err := client.Do("GET", "k1"); err == nil {
 		t.Fatal("se esperaba error del servidor")
 	}
+}
+
+func readRESPArray(r *bufio.Reader) ([]string, error) {
+	line, err := r.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	line = strings.TrimSuffix(line, "\r\n")
+	if line[0] != '*' {
+		return nil, fmt.Errorf("expected array, got %q", line)
+	}
+	n, err := strconv.Atoi(line[1:])
+	if err != nil {
+		return nil, err
+	}
+	args := make([]string, n)
+	for i := 0; i < n; i++ {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimSuffix(line, "\r\n")
+		if line[0] != '$' {
+			return nil, fmt.Errorf("expected bulk string, got %q", line)
+		}
+		lenStr := line[1:]
+		lenVal, err := strconv.Atoi(lenStr)
+		if err != nil {
+			return nil, err
+		}
+		if lenVal < 0 {
+			args[i] = ""
+			continue
+		}
+		bulk, err := r.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		bulk = strings.TrimSuffix(bulk, "\r\n")
+		args[i] = bulk
+	}
+	return args, nil
 }

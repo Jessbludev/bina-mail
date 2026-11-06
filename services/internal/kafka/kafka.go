@@ -33,7 +33,11 @@ func NewProducer(brokers []string, topic string) (*Producer, error) {
 
 // Publish escribe un registro y espera su confirmacion.
 func (p *Producer) Publish(ctx context.Context, key, value []byte) error {
-	return p.client.ProduceSync(ctx, &kgo.Record{Topic: p.topic, Key: key, Value: value})
+	results := p.client.ProduceSync(ctx, &kgo.Record{Topic: p.topic, Key: key, Value: value})
+	if len(results) > 0 && results[0].Err != nil {
+		return results[0].Err
+	}
+	return nil
 }
 
 // Close libera el cliente subyacente.
@@ -66,11 +70,11 @@ func NewConsumer(brokers []string, group, topic string) (*Consumer, error) {
 // La senal es idempotente: las reentregas duplicadas son inofensivas.
 func (c *Consumer) Run(ctx context.Context, handler func(ctx context.Context, value []byte)) {
 	for {
-		records := c.client.PollRecords(ctx, 100)
+		fetches := c.client.PollRecords(ctx, 100)
 		if ctx.Err() != nil {
 			return
 		}
-		for _, record := range records {
+		for _, record := range fetches.Records() {
 			handler(ctx, record.Value)
 		}
 	}

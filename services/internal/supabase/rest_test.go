@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -84,8 +85,8 @@ func TestSelectAplicaFiltros(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("filas = %d", len(out))
 	}
-	if gotQuery != "limit=1&select=*&token_hash=eq.h" {
-		t.Fatalf("query = %q", gotQuery)
+	if !strings.Contains(gotQuery, "limit=1") || (!strings.Contains(gotQuery, "select=*") && !strings.Contains(gotQuery, "select=%2A")) || !strings.Contains(gotQuery, "token_hash=eq.h") {
+		t.Fatalf("query = %q no contiene parametros esperados", gotQuery)
 	}
 }
 

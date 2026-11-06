@@ -19,7 +19,7 @@ func main() {
 		AuthURL:      config.Env("AUTH_URL", "http://localhost:8081"),
 		DirectoryURL: config.Env("DIRECTORY_URL", "http://localhost:8082"),
 	})
-	if brokers := config.CSV("KAFKA_BROKERS"); len(brokers) > 0 {
+	if brokers := config.CSV("KAFKA_BROKERS", ""); len(brokers) > 0 {
 		consumer, err := kafka.NewConsumer(
 			brokers,
 			config.Env("KAFKA_GROUP", "bina-realtime"),

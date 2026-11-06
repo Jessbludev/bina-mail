@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHTTPEntregaSenal(t *testing.T) {
@@ -19,9 +20,10 @@ func TestHTTPEntregaSenal(t *testing.T) {
 	defer srv.Close()
 	publisher := NewHTTPPublisher(srv.URL)
 	err := publisher.PublishEnvelopeStored(context.Background(), EnvelopeStored{
-		Event:                EventEnvelopeStored,
-		ID:                   "env-1",
+		Type:                 TypeMailboxEnvelopeStored,
+		EnvelopeID:           "env-1",
 		RecipientFingerprint: strings.Repeat("a", 64),
+		CreatedAtUnix:        time.Now().Unix(),
 	})
 	if err != nil {
 		t.Fatalf("PublishEnvelopeStored: %v", err)
@@ -38,9 +40,10 @@ func TestHTTPFallaConEstadoDeError(t *testing.T) {
 	defer srv.Close()
 	publisher := NewHTTPPublisher(srv.URL)
 	err := publisher.PublishEnvelopeStored(context.Background(), EnvelopeStored{
-		Event:                EventEnvelopeStored,
-		ID:                   "env-1",
+		Type:                 TypeMailboxEnvelopeStored,
+		EnvelopeID:           "env-1",
 		RecipientFingerprint: strings.Repeat("a", 64),
+		CreatedAtUnix:        time.Now().Unix(),
 	})
 	if err == nil {
 		t.Fatal("se esperaba error con estado 500")

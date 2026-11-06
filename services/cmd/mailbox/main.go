@@ -19,7 +19,7 @@ func main() {
 		Supabase:         supabase.New(config.Env("SUPABASE_URL", ""), config.Env("SUPABASE_SERVICE_ROLE_KEY", "")),
 		MaxEnvelopeBytes: 1 << 20,
 	}
-	if brokers := config.CSV("KAFKA_BROKERS"); len(brokers) > 0 {
+	if brokers := config.CSV("KAFKA_BROKERS", ""); len(brokers) > 0 {
 		producer, err := kafka.NewProducer(brokers, config.Env("KAFKA_TOPIC", events.TopicMailboxEnvelopeStored))
 		if err != nil {
 			log.Fatal(err)
