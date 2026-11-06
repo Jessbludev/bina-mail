@@ -18,6 +18,7 @@
 
 - La interfaz consume el dominio y las senales: cinco vistas (acceso, desbloqueo, bandeja, lectura, redaccion) con estados completos, dos stores probados (sesion y buzon) y modulos shared (api, realtime, busqueda) con suites vitest; la CI compila y ejecuta las suites en cada flujo.
 - El E2E de navegador con dos usuarios reales queda como DEBT-005 para Fase 5.
+- Hallazgo posterior: backend Go con errores de compilacion (API franz-go v1.22.1, campos de struct desactualizados, go.sum faltante) corregidos en revisión.
 
 ## Metricas Clave
 

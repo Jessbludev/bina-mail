@@ -19,14 +19,14 @@
 ## Pirámide de pruebas
 
 - 70 % unitarias (vitest en web, go test en backend; vectores criptográficos incluidos).
-- 20 % integración (gRPC con dockertest; RLS de Postgres).
-- 10 % E2E (Playwright sobre entorno de preview).
+- 20 % integración (HTTP/JSON interno con httptest; broker kfake para eventos).
+- 10 % E2E (Playwright sobre entorno de preview; DEBT-005).
 - Cobertura mínima: 80 % en dominio; 100 % en módulos criptográficos.
 
 ## Gates de CI (bloqueantes)
 
 - Tipado estricto (vue-tsc, go vet).
-- Lint (eslint, golangci-lint con gosec).
+- Lint (eslint, golangci-lint con gosec, markdownlint).
 - Pruebas con detección de carrera de datos (go test -race) y cobertura.
 - Análisis de secretos (gitleaks).
 - Auditoría de patrones de log prohibidos (zero-log).

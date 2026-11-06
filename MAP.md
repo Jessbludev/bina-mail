@@ -11,7 +11,7 @@ Regla: si un modulo no esta aqui, no existe operativamente. Marque lo pendiente 
 | apps/web/realtime | Cliente WS de señales con reconexión y refresco de bandeja | web | Señal→refresco p95 < 1 s | El token nunca viaja en URL ni query | gateway, stores |
 | apps/web/search | Índice de búsqueda local en memoria sobre sobres descifrados | web | Búsqueda p95 < 50 ms con 500 sobres | El índice vive solo en RAM, nunca persiste en claro | workers/crypto |
 | services/gateway | Borde público HTTP/WS (BFF), validación de input, cabeceras de seguridad, CORS por origen único | backend | p99 < 200 ms; disponibilidad 99,9 % | Ningún contenido en claro cruza este borde | auth, directory, mailbox, realtime |
-| services/auth | Identidad, sesiones, MFA, rotación de tokens | backend | Disponibilidad 99,9 % | El servidor jamás almacena material clave recuperable | Supabase, Dragonfly |
+| services/auth | Identidad, sesiones, rotación de tokens | backend | Disponibilidad 99,9 % | El servidor jamás almacena material clave recuperable | Supabase, Dragonfly |
 | services/directory | Registro de claves públicas, fingerprints, verificación | backend | p99 < 100 ms | Almacena solo claves públicas y metadatos mínimos | Postgres, Dragonfly |
 | services/mailbox | Persistencia y consulta de sobres cifrados | backend | Escritura p99 < 150 ms | El servidor nunca ve plaintext de mensajes | Postgres, Redpanda |
 | services/realtime | Fan-out WS de señales de eventos | backend | Señal p95 < 500 ms | Notificaciones sin contenido ni metadatos de mensajes | Redpanda, Dragonfly |

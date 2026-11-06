@@ -19,7 +19,7 @@ El modulo Go mantenia cero dependencias externas desde Fase 1. La Fase 3 exige d
 - gorilla/websocket v1.5.3 para el WS de realtime y el proxy del gateway, encapsulado en services/internal/realtimeapi y services/internal/gateway.
 - Go del modulo sube a 1.26, requisito declarado por franz-go.
 - kfake v0 (broker en proceso) queda como dependencia de pruebas del adapter kafka, con la unica prueba de extremo a extremo produce y consume.
-- go.sum no se genera localmente: el job lockfiles de la CI ejecuta go mod tidy y confirma go.sum al repositorio (DEBT-003).
+- go.sum se genera automaticamente: el job lockfiles de la CI ejecuta go mod tidy y confirma go.sum al repositorio. DEBT-003 cerrada por automatizacion.
 - govulncheck corre sobre el grafo completo de dependencias en cada push activo.
 
 ## Consecuencias

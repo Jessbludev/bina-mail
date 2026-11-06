@@ -14,19 +14,19 @@ Bina Mail requiere modularidad, eventos internos y separación de responsabilida
    - Pros: escala fina por servicio.
    - Contras: sobrecarga operativa prematura para un MVP; distribución antes de necesitarla.
    - Coste: alto.
-3. Módulos desplegables con BFF y bus de eventos: gateway Chi en el borde + servicios por dominio vía gRPC + eventos en Redpanda.
+3. Módulos desplegables con BFF y bus de eventos: gateway en el borde + servicios por dominio + eventos en Redpanda.
    - Pros: fronteras reales; escala por responsabilidad; event-driven; el BFF aísla al cliente del dominio.
    - Contras: algo más de operación que un monolito.
    - Coste: medio.
 
 ## Decisión
 
-Opción 3, con el mínimo de servicios del mapa (MAP.md): gateway (BFF), auth, directory, mailbox y realtime. gRPC entre servicios; eventos por Redpanda; el cliente web solo habla con el gateway.
+Opción 3, con el mínimo de servicios del mapa (MAP.md): gateway (BFF), auth, directory, mailbox y realtime. HTTP/JSON entre servicios (ADR-007); eventos por Redpanda; el cliente web solo habla con el gateway.
 
 ## Consecuencias
 
 - Cada módulo tiene una razón para cambiar; las fronteras se declaran en MAP.md.
-- Los contratos viven en packages/contracts (protobuf); cambios de contrato en PR dedicado con buf breaking en CI.
+- Los contratos viven en packages/contracts (protobuf); gRPC diferido (DEBT-002), transporte actual HTTP/JSON (ADR-007).
 - WebRTC queda fuera del MVP; la señal realtime es WebSocket (ADR-006).
 
 ## Condición de revisión

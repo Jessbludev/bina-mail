@@ -16,7 +16,7 @@ Mini plataforma de correo seguro y privado: mensajeria interna con cifrado de ex
 
 | Capa | Tecnologia |
 |---|---|
-| Web | TypeScript puro, Vue 3 (Composition API), Pinia, Tailwind con clases seguras y tipadas en TypeScript, Web Workers para criptografia |
+| Web | TypeScript puro, Vue 3 (Composition API), Pinia, tokens tipados (styles/tokens.ts), Web Workers para criptografia |
 | Borde | Go con net/http (stdlib): HTTP/WS publico, validacion de input, BFF |
 | Interno | HTTP/JSON entre servicios (ADR-007); contratos protobuf en packages/contracts (gRPC diferido, DEBT-002) |
 | Datos | Supabase (PostgreSQL) con RLS |
